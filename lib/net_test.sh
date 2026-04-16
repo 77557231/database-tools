@@ -5,6 +5,20 @@ run_network_test() {
     
     local network_tool="${NETWORK_TOOL:-iperf3}"
     local network_mode="${NETWORK_MODE:-single}"
+    local network_enabled="${NETWORK_ENABLED:-false}"
+    local network_client_ip="${NETWORK_CLIENT_IP:-}"
+    
+    # Check if network test is enabled
+    if [ "$network_enabled" != "true" ]; then
+        echo "Network test disabled"
+        return 0
+    fi
+    
+    # Skip network test if NETWORK_CLIENT_IP is empty (single machine test has no meaning)
+    if [ -z "$network_client_ip" ]; then
+        echo "Skipping network test: NETWORK_CLIENT_IP is empty (single machine test has no meaning)"
+        return 0
+    fi
     
     # Check if iperf3 is installed
     if ! command -v iperf3 &> /dev/null; then
@@ -44,6 +58,10 @@ run_single_network_test() {
     local port="${NETWORK_PORT:-25201}"
     local duration="${NETWORK_DURATION:-20}"
     local parallel="${NETWORK_PARALLEL:-1}"
+    
+    # Create output directory if it doesn't exist
+    local output_dir="./output"
+    mkdir -p "$output_dir/data"
     
     # Auto-detect server IP if not set
     local server_ip="${NETWORK_SERVER_IP}"
@@ -93,8 +111,8 @@ run_single_network_test() {
         
         # Calculate timeout: duration + 15s buffer for each client
         local client_timeout=$((duration + 15))
-        local client_output_file="/tmp/vb_network_${TIMESTAMP}_client${client_idx}.txt"
-        local client_text_output="/tmp/vb_network_text_${TIMESTAMP}_client${client_idx}.txt"
+        local client_output_file="$output_dir/data/network_scenario_${client_idx}.json"
+        local client_text_output="$output_dir/data/network_scenario_${client_idx}_text.txt"
         
         # Run iperf3 client with timeout and capture both JSON and text output
         if timeout $client_timeout iperf3 -c "$server_ip" \
@@ -120,8 +138,7 @@ run_single_network_test() {
             echo "  ⚠ Client $client test failed or timed out"
         fi
         
-        # Cleanup individual temp files
-        rm -f "$client_output_file" "$client_text_output"
+        # Keep the files for report generation
     done
     
     echo ""
@@ -156,6 +173,10 @@ display_per_second_throughput() {
 # Multi-server network test
 run_multi_server_network_test() {
     echo "Starting multi-server network test..."
+    
+    # Create output directory if it doesn't exist
+    local output_dir="./output"
+    mkdir -p "$output_dir/data"
     
     # Parse server list
     local servers=$(parse_servers)
@@ -277,21 +298,27 @@ run_multi_server_network_test() {
         echo ""
         echo "Executing scenario $scenario_idx: $client_ip -> $server_ip (${duration}s)"
         
-        local output_file="$OUTPUT_DIR/data/network_scenario_${scenario_idx}.json"
+        # Run iperf3 locally
+        # Note: For remote testing, SSH passwordless login is required
+        echo "  Running network test..."
+        echo "  Command: iperf3 -c $server_ip -p $port -t $duration -J"
         
-        # SSH to client to run iperf3 (even for local tests)
-        # Note: SSH passwordless login required for actual use
-        echo "  Running network test via SSH..."
-        echo "  SSH command: ssh $client_ip \"iperf3 -c $server_ip -p $port -t $duration -J\""
+        # Create output directory if it doesn't exist
+        local output_dir="./output"
+        mkdir -p "$output_dir/data"
         
-        # Run iperf3 via SSH
-        ssh "$client_ip" "iperf3 -c '$server_ip' -p '$port' -t '$duration' -J" > "$output_file" 2>&1
+        # Update output file path
+        local output_file="$output_dir/data/network_scenario_${scenario_idx}.json"
         
-        # Check if SSH command succeeded
+        # Run iperf3 locally
+        echo "  Running network test locally..."
+        iperf3 -c "$server_ip" -p "$port" -t "$duration" -J > "$output_file" 2>&1
+        
+        # Check if iperf3 command succeeded
         if [ $? -eq 0 ]; then
             # Capture text format output for per-second data
-            local text_output="$OUTPUT_DIR/data/network_scenario_${scenario_idx}_text.txt"
-            ssh "$client_ip" "iperf3 -c '$server_ip' -p '$port' -t '$duration'" 2>&1 | grep -v "^$" > "$text_output"
+            local text_output="$output_dir/data/network_scenario_${scenario_idx}_text.txt"
+            iperf3 -c "$server_ip" -p "$port" -t "$duration" 2>&1 | grep -v "^$" > "$text_output"
             
             # Parse and display result
             parse_iperf3_result "$output_file"
@@ -299,13 +326,14 @@ run_multi_server_network_test() {
             # Display per-second throughput
             display_per_second_throughput "$text_output" "$server_ip (from $client_ip)"
             
-            echo "  ✓ Network test completed via SSH"
+            # Append to combined results file
+            append_to_combined_result "NETWORK TEST RESULTS ($server_ip from $client_ip)" "$text_output"
+            
+            echo "  ✓ Network test completed locally"
         else
-            echo "  ⚠ SSH connection to $client_ip failed"
-            echo "  Tip: Ensure SSH passwordless login is configured"
+            echo "  ⚠ iperf3 test failed"
             
             # For demonstration, just create an empty file
-            mkdir -p "$OUTPUT_DIR/data"
             touch "$output_file"
         fi
         
@@ -339,12 +367,13 @@ parse_iperf3_result() {
     
     # Extract metrics
     local bandwidth_bps=$(jq -r '.end.sum_received.bits_per_second // 0' "$json_file" 2>/dev/null)
-    local bandwidth_mbps=$(awk "BEGIN {printf \"%.2f\", $bandwidth_bps / 1000000}" 2>/dev/null || echo "0")
+    # Convert bps to MB/s: 1 MB/s = 8,000,000 bps
+    local bandwidth_mbs=$(awk "BEGIN {printf \"%.2f\", $bandwidth_bps / 8000000}" 2>/dev/null || echo "0")
     
     # Display summary
     echo ""
     echo "Network test results:"
-    echo "  Bandwidth: ${bandwidth_mbps} Mbps"
+    echo "  Bandwidth: ${bandwidth_mbs} MB/s"
     
     # Only show jitter and packet loss for UDP tests (not applicable for TCP)
     if [ "${NETWORK_PROTOCOL:-tcp}" = "udp" ]; then

@@ -217,29 +217,49 @@ EOF
     if [ -f "$combined_file" ]; then
         # Check if network test results exist
         if grep -q "NETWORK TEST RESULTS" "$combined_file" 2>/dev/null; then
-            # Extract bandwidth from text output (receiver line showing total bandwidth)
-            # Format: [  5]   0.00-20.00  sec  31.2 GBytes  13.4 Gbits/sec
-            local net_bw_line=$(grep -A200 "NETWORK TEST RESULTS" "$combined_file" 2>/dev/null | grep "sec" | grep "receiver" | head -1)
-            local net_bw_mbps="0"
-            if [ -n "$net_bw_line" ]; then
-                # Extract Gbits/sec value and convert to Mbps
-                local net_bw_gbps=$(echo "$net_bw_line" | awk '{for(i=1;i<=NF;i++) if($i ~ /Gbits\/sec/) print $(i-1)}')
-                if [ -n "$net_bw_gbps" ]; then
-                    net_bw_mbps=$(awk "BEGIN {printf \"%.2f\", ${net_bw_gbps:-0} * 1000}")
+            # Extract all network test results for each client
+            local found_results=false
+            
+            # Get the output directory from the combined file path
+            local output_dir=$(dirname "$combined_file")
+            
+            # Get all network test scenarios
+            local scenario_count=$(grep -c "NETWORK TEST RESULTS" "$combined_file")
+            
+            # Process each scenario
+            local i=1
+            while [ $i -le $scenario_count ]; do
+                # Find the corresponding JSON file
+                local json_file="$output_dir/data/network_scenario_${i}.json"
+                local net_bw="0"
+                local client_ip="N/A"
+                
+                if [ -f "$json_file" ]; then
+                    # Check if jq is installed
+                    if command -v jq &> /dev/null; then
+                        # Extract bandwidth from JSON file
+                        local bandwidth_bps=$(jq -r '.end.sum_received.bits_per_second // 0' "$json_file" 2>/dev/null)
+                        # Convert bps to MB/s: 1 MB/s = 8,000,000 bps
+                        net_bw=$(awk "BEGIN {printf \"%.2f\", $bandwidth_bps / 8000000}" 2>/dev/null || echo "0")
+                        
+                        # Extract client IP from the JSON file if available
+                        local local_ip=$(jq -r '.start.connected[0].local_host // ""' "$json_file" 2>/dev/null)
+                        if [ -n "$local_ip" ]; then
+                            client_ip="$local_ip"
+                        fi
+                    fi
                 fi
-            fi
+                
+                # Display result with client IP
+                echo "  Client: ${client_ip}" >> "$report_file"
+                echo "  Bandwidth:      ${net_bw} MB/s" >> "$report_file"
+                echo "" >> "$report_file"
+                
+                found_results=true
+                i=$((i + 1))
+            done
             
-            # Jitter and packet loss not available in text format, set to 0
-            local net_jitter="0"
-            local net_lost="0"
-            
-            if [ -n "$net_bw_mbps" ] && [ "$net_bw_mbps" != "0.00" ]; then
-                cat >> "$report_file" << EOF
-  Bandwidth:      ${net_bw_mbps} Mbps
-  Jitter:         ${net_jitter} ms
-  Lost Packets:   ${net_lost}
-EOF
-            else
+            if [ "$found_results" = false ]; then
                 echo "  Test executed but no results parsed" >> "$report_file"
             fi
         else
