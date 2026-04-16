@@ -1,6 +1,6 @@
-# Vastbase System Benchmark Tool
+# Database System Benchmark Tool
 
-一款专为 Vastbase 数据库设计的系统层性能压测工具，支持快速验收和生产基线两种模式，帮助评估服务器硬件性能边界。
+A system-level performance benchmarking tool designed for Vastbase, openGauss, and PostgreSQL databases, supporting both quick acceptance and production baseline modes to help evaluate server hardware performance boundaries.
 
 ## 特性
 
@@ -13,11 +13,11 @@
 
 ## 快速开始
 
-### 1. 安装依赖
+### 1. Installation
 
-### 方式一：包管理器安装（推荐）
+### Method 1: Package Manager (Recommended)
 
-#### 快速模式（最小依赖）
+#### Quick Mode (Minimum Dependencies)
 ```bash
 # CentOS/RHEL
 sudo yum install -y sysbench
@@ -26,7 +26,7 @@ sudo yum install -y sysbench
 sudo apt-get install -y sysbench
 ```
 
-#### 生产模式（完整依赖）
+#### Production Mode (Full Dependencies)
 ```bash
 # CentOS/RHEL
 sudo yum install -y sysbench fio iperf3 jq
@@ -34,6 +34,12 @@ sudo yum install -y sysbench fio iperf3 jq
 # Ubuntu/Debian
 sudo apt-get install -y sysbench fio iperf3 jq
 ```
+
+### 2. Supported Databases
+
+- ✅ **Vastbase**：Huawei enterprise-grade database
+- ✅ **openGauss**：Open source relational database
+- ✅ **PostgreSQL**：Open source object-relational database
 
 ### 方式二：源码编译安装（当包管理器不可用时）
 

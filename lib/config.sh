@@ -46,7 +46,7 @@ parse_servers() {
 }
 
 # 解析测试场景配置
-# 格式：CLIENT_IP:SERVER_IP:Duration
+# 格式：CLIENT_IP:SERVER_IP:Duration (Duration is optional)
 parse_test_scenarios() {
     local scenarios_str="${TEST_SCENARIOS:-}"
     if [ -z "$scenarios_str" ]; then
