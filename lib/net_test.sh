@@ -159,20 +159,119 @@ run_multi_server_network_test() {
     
     # Parse server list
     local servers=$(parse_servers)
+    local server_ip=""
+    
     if [ -z "$servers" ]; then
-        echo "Error: Server list not configured, please set SERVERS in config file"
-        return 1
+        # Generate server list from NETWORK_SERVER_IP and NETWORK_CLIENT_IP
+        server_ip="${NETWORK_SERVER_IP}"
+        local client_ip="${NETWORK_CLIENT_IP}"
+        
+        if [ -z "$server_ip" ]; then
+            server_ip=$(get_machine_ip)
+            echo "  Auto-detected server IP: $server_ip"
+        fi
+        
+        if [ -z "$client_ip" ]; then
+            client_ip="$server_ip"
+            echo "  Auto-detected client IP: $client_ip"
+        fi
+        
+        # Convert client IPs to array
+        local client_ips=($client_ip)
+        
+        # Generate server list
+        echo "  Generating server list from NETWORK_SERVER_IP and NETWORK_CLIENT_IP..."
+        servers=""
+        for client in "${client_ips[@]}"; do
+            servers+="$client|client|"
+        done
+        servers+="$server_ip|server|"
+    else
+        # Extract server IP from server list
+        server_ip=$(echo "$servers" | grep '|server|' | cut -d'|' -f1 | head -1)
+        if [ -z "$server_ip" ]; then
+            server_ip=$(get_machine_ip)
+            echo "  Auto-detected server IP: $server_ip"
+        fi
     fi
     
     # Parse test scenarios
     local scenarios=$(parse_test_scenarios)
+    local default_duration="${NETWORK_DURATION:-60}"
+    
     if [ -z "$scenarios" ]; then
-        echo "Error: Test scenarios not configured, please set TEST_SCENARIOS in config file"
-        return 1
+        # Generate test scenarios from server list and NETWORK_DURATION
+        local client_ip="${NETWORK_CLIENT_IP}"
+        
+        if [ -z "$client_ip" ]; then
+            client_ip="$server_ip"
+        fi
+        
+        # Convert client IPs to array
+        local client_ips=($client_ip)
+        
+        # Generate test scenarios
+        echo "  Generating test scenarios from NETWORK_SERVER_IP, NETWORK_CLIENT_IP, and NETWORK_DURATION..."
+        scenarios=""
+        for client in "${client_ips[@]}"; do
+            scenarios+="$client|$server_ip|$default_duration,"
+        done
+        # Remove trailing comma
+        scenarios=${scenarios%,}
+    else
+        # Use default duration if not specified in TEST_SCENARIOS
+        local updated_scenarios=""
+        while IFS='|' read -r client_ip server_ip duration; do
+            if [ -z "$duration" ]; then
+                duration="$default_duration"
+            fi
+            updated_scenarios+="$client_ip|$server_ip|$duration,"
+        done <<< "$(echo "$scenarios" | tr ',' '\n')"
+        # Remove trailing comma
+        scenarios=${updated_scenarios%,}
     fi
     
-    # Execute each test scenario
+    # Start iperf3 server in background for local tests
+    local port="${NETWORK_PORT:-25201}"
+    local iperf3_pid=""
+    
+    # Check if port is already in use
+    if lsof -i:$port > /dev/null 2>&1; then
+        echo "  Port $port is already in use, killing existing process..."
+        pkill -f "iperf3 -s -p $port" 2>/dev/null || true
+        pkill iperf3 2>/dev/null || true
+        sleep 2
+    fi
+    
+    echo "  Starting iperf3 server on port $port..."
+    # Start iperf3 server in a different way
+    (iperf3 -s -p "$port" > /tmp/iperf3_server.log 2>&1) &
+    iperf3_pid=$!
+    sleep 3  # Wait for server to start
+    
+    # Verify server is running
+    if ! ps -p "$iperf3_pid" > /dev/null 2>&1; then
+        echo "⚠ Failed to start iperf3 server"
+        echo "  Server log:"
+        cat /tmp/iperf3_server.log 2>/dev/null
+        # Try alternative approach
+        echo "  Trying alternative approach..."
+        iperf3 -s -p "$port" -D > /tmp/iperf3_server_alt.log 2>&1
+        iperf3_pid=$!
+        sleep 2
+        if ! ps -p "$iperf3_pid" > /dev/null 2>&1; then
+            echo "  Alternative approach failed"
+            echo "  Alternative log:"
+            cat /tmp/iperf3_server_alt.log 2>/dev/null
+            return 1
+        fi
+    fi
+    
+    echo "  iperf3 server started successfully with PID: $iperf3_pid"
+    
+    # Execute each test scenario sequentially
     local scenario_idx=0
+    
     while IFS='|' read -r client_ip server_ip duration; do
         scenario_idx=$((scenario_idx + 1))
         echo ""
@@ -180,16 +279,47 @@ run_multi_server_network_test() {
         
         local output_file="$OUTPUT_DIR/data/network_scenario_${scenario_idx}.json"
         
-        # SSH to client to run iperf3
+        # SSH to client to run iperf3 (even for local tests)
         # Note: SSH passwordless login required for actual use
-        echo "  ⚠ SSH connection to $client_ip required to run test"
-        echo "  Tip: After configuring SSH passwordless login, use following command:"
-        echo "  ssh $client_ip \"iperf3 -c $server_ip -t $duration -J\" > $output_file"
+        echo "  Running network test via SSH..."
+        echo "  SSH command: ssh $client_ip \"iperf3 -c $server_ip -p $port -t $duration -J\""
         
-    done <<< "$servers"
+        # Run iperf3 via SSH
+        ssh "$client_ip" "iperf3 -c '$server_ip' -p '$port' -t '$duration' -J" > "$output_file" 2>&1
+        
+        # Check if SSH command succeeded
+        if [ $? -eq 0 ]; then
+            # Capture text format output for per-second data
+            local text_output="$OUTPUT_DIR/data/network_scenario_${scenario_idx}_text.txt"
+            ssh "$client_ip" "iperf3 -c '$server_ip' -p '$port' -t '$duration'" 2>&1 | grep -v "^$" > "$text_output"
+            
+            # Parse and display result
+            parse_iperf3_result "$output_file"
+            
+            # Display per-second throughput
+            display_per_second_throughput "$text_output" "$server_ip (from $client_ip)"
+            
+            echo "  ✓ Network test completed via SSH"
+        else
+            echo "  ⚠ SSH connection to $client_ip failed"
+            echo "  Tip: Ensure SSH passwordless login is configured"
+            
+            # For demonstration, just create an empty file
+            mkdir -p "$OUTPUT_DIR/data"
+            touch "$output_file"
+        fi
+        
+    done <<< "$(echo "$scenarios" | tr ',' '\n')"
+
+    
+    # Stop iperf3 server
+    echo "  Stopping iperf3 server..."
+    kill "$iperf3_pid" 2>/dev/null || true
+    pkill -f "iperf3 -s -p $port" 2>/dev/null || true
+    sleep 1
     
     echo ""
-    echo "✓ Multi-server network test configuration completed"
+    echo "✓ Multi-server network test completed"
 }
 
 # Parse iperf3 JSON result
