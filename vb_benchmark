@@ -1,0 +1,241 @@
+#!/bin/bash
+#--------------------------------------------------------------------------------
+#-- File name:   vb_benchmark
+#-- Version:     v1.0.0
+#-- Purpose:     Vastbase System Benchmark Tool
+#-- Author:      Vastbase Performance Team
+#-- Description: 一键式系统压测工具，支持快速验收和生产基线两种模式
+#--------------------------------------------------------------------------------
+
+set -e
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# 加载库函数
+source "$SCRIPT_DIR/lib/utils.sh"
+source "$SCRIPT_DIR/lib/config.sh"
+source "$SCRIPT_DIR/lib/env_checker.sh"
+source "$SCRIPT_DIR/lib/io_test.sh"
+source "$SCRIPT_DIR/lib/net_test.sh"
+source "$SCRIPT_DIR/lib/threads_test.sh"
+source "$SCRIPT_DIR/lib/mutex_test.sh"
+source "$SCRIPT_DIR/lib/result_parser.sh"
+source "$SCRIPT_DIR/lib/report.sh"
+
+# 默认参数
+MODE="quick"
+CONFIG_FILE=""
+OUTPUT_DIR="./output"
+DRY_RUN=false
+
+# 立即 export 供库函数使用
+export OUTPUT_DIR
+
+# Show help information
+show_help() {
+    cat << EOF
+Vastbase System Benchmark Tool (vb_benchmark)
+
+Usage:
+  vb_benchmark [options]
+
+Options:
+  -m, --mode <MODE>       Test mode (quick|production|deep), default: quick
+  -c, --config <FILE>     Custom configuration file path
+  -o, --output <DIR>      Output directory, default: ./output
+  --dry-run               Dry-run mode (environment check only)
+  -h, --help              Show this help message
+
+Test Modes:
+  quick       Quick acceptance mode, sysbench only, 5-10 minutes
+  production  Production baseline mode, sysbench+fio+iperf3, 30-60 minutes
+  deep        Deep test mode, comprehensive performance evaluation, 2 hours
+
+Examples:
+  vb_benchmark                        # Quick acceptance mode
+  vb_benchmark -m production          # Production baseline mode
+  vb_benchmark --dry-run              # Environment check
+  vb_benchmark -c ./my_config.conf    # Custom configuration
+
+Dependencies:
+  Quick mode: sysbench
+  Production mode: sysbench, fio, iperf3, jq (recommended)
+EOF
+}
+
+# Command line argument parsing
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        -m|--mode)
+            MODE="$2"
+            shift 2
+            ;;
+        -c|--config)
+            CONFIG_FILE="$2"
+            shift 2
+            ;;
+        -o|--output)
+            OUTPUT_DIR="$2"
+            shift 2
+            ;;
+        --dry-run)
+            DRY_RUN=true
+            shift
+            ;;
+        -h|--help)
+            show_help
+            exit 0
+            ;;
+        *)
+            echo "Error: Unknown option: $1"
+            show_help
+            exit 1
+            ;;
+    esac
+done
+
+# CPU test function
+run_cpu_test() {
+    echo "=== CPU Performance Test ==="
+    
+    local threads="${CPU_THREADS:-0}"
+    if [ "$threads" -eq 0 ]; then
+        threads=$(get_cpu_cores)
+        echo "Auto-detected CPU cores: $threads"
+    fi
+    
+    local temp_output_file="/tmp/vb_cpu_${TIMESTAMP}.txt"
+    
+    echo "Starting CPU test..."
+    echo "Threads: $threads, Duration: ${CPU_DURATION:-60}s"
+    
+    sysbench cpu \
+        --cpu-max-prime="${CPU_MAX_PRIME:-20000}" \
+        --threads="$threads" \
+        --time="${CPU_DURATION:-60}" \
+        run > "$temp_output_file" 2>&1
+    
+    # Parse result and display detailed output
+    parse_cpu_result "$temp_output_file"
+    
+    # Append to combined results file
+    append_to_combined_result "CPU TEST RESULTS" "$temp_output_file"
+    
+    # Cleanup temp file
+    rm -f "$temp_output_file"
+    
+    echo "✓ CPU test completed"
+}
+
+# Memory test function
+run_memory_test() {
+    echo "=== Memory Performance Test ==="
+    
+    local temp_output_file="/tmp/vb_memory_${TIMESTAMP}.txt"
+    
+    echo "Starting memory test..."
+    echo "Block size: ${MEMORY_BLOCK_SIZE:-1M}, Total size: ${MEMORY_TOTAL_SIZE:-10G}, Threads: ${MEMORY_THREADS:-1}"
+    
+    sysbench memory \
+        --memory-block-size="${MEMORY_BLOCK_SIZE:-1M}" \
+        --memory-total-size="${MEMORY_TOTAL_SIZE:-10G}" \
+        --memory-oper="${MEMORY_OPER:-read}" \
+        --threads="${MEMORY_THREADS:-1}" \
+        --time="${MEMORY_DURATION:-60}" \
+        run > "$temp_output_file" 2>&1
+    
+    # Parse result and display detailed output
+    parse_memory_result "$temp_output_file"
+    
+    # Append to combined results file
+    append_to_combined_result "MEMORY TEST RESULTS" "$temp_output_file"
+    
+    # Cleanup temp file
+    rm -f "$temp_output_file"
+    
+    echo "✓ Memory test completed"
+}
+
+# Validate mode
+if [[ ! "$MODE" =~ ^(quick|production|deep)$ ]]; then
+    echo "Error: Invalid mode '$MODE', valid options: quick, production, deep"
+    exit 1
+fi
+
+# Load configuration
+load_config "$MODE" "$CONFIG_FILE"
+
+# Environment check
+if [ "$DRY_RUN" = true ]; then
+    echo "=== Environment Check Mode ==="
+    echo ""
+    check_all
+    echo ""
+    echo "✓ Environment check passed!"
+    exit 0
+fi
+
+# 设置时间戳用于统一命名
+TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+export TIMESTAMP
+
+# 创建输出目录（直接使用 output 目录，不再创建子目录）
+mkdir -p "$OUTPUT_DIR"
+
+# 执行测试
+echo "========================================"
+echo "  Vastbase System Benchmark"
+echo "========================================"
+echo "Mode: $MODE"
+echo "Start Time: $(date '+%Y-%m-%d %H:%M:%S')"
+echo "Output Directory: $OUTPUT_DIR"
+echo "========================================"
+echo ""
+
+TEST_START_TIME=$(date +%s)
+
+# 执行各项测试
+if [ "$CPU_ENABLED" = "true" ]; then
+    run_cpu_test
+    echo ""
+fi
+
+if [ "$MEMORY_ENABLED" = "true" ]; then
+    run_memory_test
+    echo ""
+fi
+
+if [ "$IO_ENABLED" = "true" ]; then
+    run_io_test
+    echo ""
+fi
+
+if [ "$NETWORK_ENABLED" = "true" ]; then
+    run_network_test
+    echo ""
+fi
+
+if [ "$THREADS_ENABLED" = "true" ]; then
+    run_threads_test
+    echo ""
+fi
+
+if [ "$MUTEX_ENABLED" = "true" ]; then
+    run_mutex_test
+    echo ""
+fi
+
+# 生成报告
+generate_report
+
+# 计算总耗时
+TEST_END_TIME=$(date +%s)
+TOTAL_DURATION=$((TEST_END_TIME - TEST_START_TIME))
+
+echo "========================================"
+echo "  Test Completed!"
+echo "========================================"
+echo "Total Duration: ${TOTAL_DURATION} seconds"
+echo "Report: $OUTPUT_DIR/report_benchmark_${TIMESTAMP}.txt"
+echo "Combined Results: $OUTPUT_DIR/data_${TIMESTAMP}_all_results.txt"
+echo "========================================"

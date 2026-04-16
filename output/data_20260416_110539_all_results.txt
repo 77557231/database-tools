@@ -1,0 +1,259 @@
+
+================================================================================
+CPU TEST RESULTS
+================================================================================
+sysbench 1.0.20-9578e16 (using bundled LuaJIT 2.1.0-beta2)
+
+Running the test with following options:
+Number of threads: 4
+Initializing random number generator from current time
+
+
+Prime numbers limit: 20000
+
+Initializing worker threads...
+
+Threads started!
+
+CPU speed:
+    events per second:   852.06
+
+General statistics:
+    total time:                          10.0067s
+    total number of events:              8528
+
+Latency (ms):
+         min:                                    3.04
+         avg:                                    4.69
+         max:                                   43.12
+         95th percentile:                       12.30
+         sum:                                39998.51
+
+Threads fairness:
+    events (avg/stddev):           2132.0000/95.01
+    execution time (avg/stddev):   9.9996/0.00
+
+
+
+================================================================================
+MEMORY TEST RESULTS
+================================================================================
+sysbench 1.0.20-9578e16 (using bundled LuaJIT 2.1.0-beta2)
+
+Running the test with following options:
+Number of threads: 10
+Initializing random number generator from current time
+
+
+Running memory speed test with the following options:
+  block size: 8KiB
+  total size: 20480MiB
+  operation: read
+  scope: global
+
+Initializing worker threads...
+
+Threads started!
+
+Total operations: 2621440 (6760957.08 per second)
+
+20480.00 MiB transferred (52819.98 MiB/sec)
+
+
+General statistics:
+    total time:                          0.3853s
+    total number of events:              2621440
+
+Latency (ms):
+         min:                                    0.00
+         avg:                                    0.00
+         max:                                   36.02
+         95th percentile:                        0.00
+         sum:                                 1989.97
+
+Threads fairness:
+    events (avg/stddev):           262144.0000/0.00
+    execution time (avg/stddev):   0.1990/0.04
+
+
+
+================================================================================
+SYSBENCH FILEIO TEST RESULTS
+================================================================================
+sysbench 1.0.20-9578e16 (using bundled LuaJIT 2.1.0-beta2)
+
+Running the test with following options:
+Number of threads: 1
+Initializing random number generator from current time
+
+
+Extra file open flags: (none)
+1 files, 100MiB each
+100MiB total file size
+Block size 16KiB
+Number of IO requests: 0
+Read/Write ratio for combined random IO test: 1.50
+Periodic FSYNC enabled, calling fsync() each 100 requests.
+Calling fsync() at the end of test, Enabled.
+Using synchronous I/O mode
+Doing random r/w test
+Initializing worker threads...
+
+Threads started!
+
+
+File operations:
+    reads/s:                      16556.96
+    writes/s:                     11037.98
+    fsyncs/s:                     275.98
+
+Throughput:
+    read, MiB/s:                  258.70
+    written, MiB/s:               172.47
+
+General statistics:
+    total time:                          10.0017s
+    total number of events:              278825
+
+Latency (ms):
+         min:                                    0.00
+         avg:                                    0.04
+         max:                                   65.00
+         95th percentile:                        0.02
+         sum:                                 9885.13
+
+Threads fairness:
+    events (avg/stddev):           278825.0000/0.00
+    execution time (avg/stddev):   9.8851/0.00
+
+
+
+================================================================================
+NETWORK TEST RESULTS (172.16.53.128 from 172.16.53.128)
+================================================================================
+Connecting to host 172.16.53.128, port 25201
+[  5] local 172.16.53.128 port 49438 connected to 172.16.53.128 port 25201
+[ ID] Interval           Transfer     Bitrate         Retr  Cwnd
+[  5]   0.00-1.02   sec   602 MBytes  4.93 Gbits/sec    0   4.06 MBytes       
+[  5]   1.02-2.00   sec   524 MBytes  4.50 Gbits/sec    0   4.75 MBytes       
+[  5]   2.00-3.00   sec  1.44 GBytes  12.3 Gbits/sec    0   7.37 MBytes       
+[  5]   3.00-4.00   sec  1.84 GBytes  15.8 Gbits/sec    0   7.37 MBytes       
+[  5]   4.00-5.00   sec  1.85 GBytes  15.9 Gbits/sec    0   7.37 MBytes       
+[  5]   5.00-6.00   sec  1.85 GBytes  15.9 Gbits/sec    0   7.37 MBytes       
+[  5]   6.00-7.00   sec  1.84 GBytes  15.8 Gbits/sec    0   7.37 MBytes       
+[  5]   7.00-8.00   sec  1.83 GBytes  15.8 Gbits/sec    0   7.37 MBytes       
+[  5]   8.00-9.02   sec  1.59 GBytes  13.4 Gbits/sec    0   11.1 MBytes       
+[  5]   9.02-10.00  sec   716 MBytes  6.09 Gbits/sec    0   11.1 MBytes       
+[  5]  10.00-11.00  sec   520 MBytes  4.37 Gbits/sec    0   11.1 MBytes       
+[  5]  11.00-12.00  sec  1.68 GBytes  14.4 Gbits/sec    0   11.1 MBytes       
+[  5]  12.00-13.00  sec  1.88 GBytes  16.2 Gbits/sec    0   11.1 MBytes       
+[  5]  13.00-14.00  sec  1.89 GBytes  16.2 Gbits/sec    0   11.1 MBytes       
+[  5]  14.00-15.00  sec  1.95 GBytes  16.7 Gbits/sec    0   11.1 MBytes       
+[  5]  15.00-16.00  sec  1.73 GBytes  14.8 Gbits/sec    0   11.1 MBytes       
+[  5]  16.00-17.00  sec  1.71 GBytes  14.7 Gbits/sec    0   11.1 MBytes       
+[  5]  17.00-18.01  sec  1.13 GBytes  9.61 Gbits/sec   16   11.1 MBytes       
+[  5]  18.01-19.00  sec   824 MBytes  6.99 Gbits/sec    0   11.1 MBytes       
+[  5]  19.00-20.00  sec  1.51 GBytes  13.0 Gbits/sec    0   11.1 MBytes       
+- - - - - - - - - - - - - - - - - - - - - - - - -
+[ ID] Interval           Transfer     Bitrate         Retr
+[  5]   0.00-20.00  sec  28.8 GBytes  12.4 Gbits/sec   16             sender
+[  5]   0.00-30.07  sec  28.8 GBytes  8.24 Gbits/sec                  receiver
+iperf Done.
+
+
+================================================================================
+NETWORK TEST RESULTS (172.16.53.128 from 172.16.53.128)
+================================================================================
+Connecting to host 172.16.53.128, port 25201
+[  5] local 172.16.53.128 port 45204 connected to 172.16.53.128 port 25201
+[ ID] Interval           Transfer     Bitrate         Retr  Cwnd
+[  5]   0.00-1.00   sec  1.13 GBytes  9.69 Gbits/sec    0   4.87 MBytes       
+[  5]   1.00-2.00   sec   705 MBytes  5.91 Gbits/sec    0   7.62 MBytes       
+[  5]   2.00-3.00   sec   690 MBytes  5.79 Gbits/sec    0   7.99 MBytes       
+[  5]   3.00-4.00   sec  1.49 GBytes  12.8 Gbits/sec    3   8.37 MBytes       
+[  5]   4.00-5.00   sec  1.84 GBytes  15.8 Gbits/sec    0   8.37 MBytes       
+[  5]   5.00-6.00   sec  1.87 GBytes  16.1 Gbits/sec    0   8.37 MBytes       
+[  5]   6.00-7.00   sec  1.92 GBytes  16.4 Gbits/sec    0   8.37 MBytes       
+[  5]   7.00-8.00   sec  1.89 GBytes  16.3 Gbits/sec    0   8.37 MBytes       
+[  5]   8.00-9.00   sec  1.91 GBytes  16.4 Gbits/sec    0   8.37 MBytes       
+[  5]   9.00-10.00  sec  1.54 GBytes  13.2 Gbits/sec    0   8.37 MBytes       
+[  5]  10.00-11.00  sec   672 MBytes  5.64 Gbits/sec    0   8.37 MBytes       
+[  5]  11.00-12.00  sec  1.07 GBytes  9.22 Gbits/sec    0   8.37 MBytes       
+[  5]  12.00-13.00  sec  1.87 GBytes  16.1 Gbits/sec    1   8.37 MBytes       
+[  5]  13.00-14.00  sec  1.86 GBytes  16.0 Gbits/sec    1   8.37 MBytes       
+[  5]  14.00-15.00  sec  1.90 GBytes  16.3 Gbits/sec    0   8.37 MBytes       
+[  5]  15.00-16.00  sec  1.71 GBytes  14.7 Gbits/sec    4   8.37 MBytes       
+[  5]  16.00-17.00  sec  1.66 GBytes  14.3 Gbits/sec    1   8.37 MBytes       
+[  5]  17.00-18.00  sec  1.46 GBytes  12.6 Gbits/sec    1   8.37 MBytes       
+[  5]  18.00-19.02  sec  1.14 GBytes  9.64 Gbits/sec    0   8.37 MBytes       
+[  5]  19.02-20.00  sec   662 MBytes  5.67 Gbits/sec    0   8.37 MBytes       
+- - - - - - - - - - - - - - - - - - - - - - - - -
+[ ID] Interval           Transfer     Bitrate         Retr
+[  5]   0.00-20.00  sec  28.9 GBytes  12.4 Gbits/sec   11             sender
+[  5]   0.00-20.04  sec  28.9 GBytes  12.4 Gbits/sec                  receiver
+iperf Done.
+
+
+================================================================================
+THREADS TEST RESULTS
+================================================================================
+sysbench 1.0.20-9578e16 (using bundled LuaJIT 2.1.0-beta2)
+
+Running the test with following options:
+Number of threads: 100
+Initializing random number generator from current time
+
+
+Initializing worker threads...
+
+Threads started!
+
+
+General statistics:
+    total time:                          10.0496s
+    total number of events:              35180
+
+Latency (ms):
+         min:                                    0.14
+         avg:                                   28.49
+         max:                                  366.02
+         95th percentile:                      104.84
+         sum:                              1002423.86
+
+Threads fairness:
+    events (avg/stddev):           351.8000/30.02
+    execution time (avg/stddev):   10.0242/0.02
+
+
+
+================================================================================
+MUTEX TEST RESULTS
+================================================================================
+sysbench 1.0.20-9578e16 (using bundled LuaJIT 2.1.0-beta2)
+
+Running the test with following options:
+Number of threads: 100
+Initializing random number generator from current time
+
+
+Initializing worker threads...
+
+Threads started!
+
+
+General statistics:
+    total time:                          5.4083s
+    total number of events:              100
+
+Latency (ms):
+         min:                                 4968.84
+         avg:                                 5238.17
+         max:                                 5384.86
+         95th percentile:                     5312.73
+         sum:                               523816.83
+
+Threads fairness:
+    events (avg/stddev):           1.0000/0.00
+    execution time (avg/stddev):   5.2382/0.10
+
+
