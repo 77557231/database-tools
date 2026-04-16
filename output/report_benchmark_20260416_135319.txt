@@ -1,0 +1,100 @@
+================================================================================
+                    Vastbase System Benchmark Report
+================================================================================
+
+Basic Information
+-----------------
+Test Mode: production
+Test Time: 2026-04-16 13:55:11
+Hostname: vastbase
+CPU Cores: 4
+Memory Size: 7937 MB
+
+================================================================================
+                           Test Configuration
+================================================================================
+
+[CPU Test]
+  Threads: auto (4)
+  Duration: 10s
+  Max Prime: 20000
+
+[Memory Test]
+  Block Size: 8K
+  Total Size: 20G
+  Operation: read
+  Duration: 10s
+
+[IO Test]
+  Tool: sysbench
+  File Size: 100M
+  Test Mode: rndrw
+  File Num: 1
+  Duration: 10s
+
+[Threads Test]
+  Threads: 100
+  Duration: 10s
+  Yields: 100
+  Locks: 4
+
+[Mutex Test]
+  Threads: 100
+  Duration: 10s
+  Mutex Num: 1024
+
+[Network Test]
+  Enabled: true
+  Tool: iperf3
+  Server: N/A
+  Port: 25201
+  Duration: 30s
+  Parallel: 1
+
+================================================================================
+                           Test Results Summary
+================================================================================
+
+[CPU Test]
+  CPU speed:
+    events per second: 922.72
+  Avg Latency:   4.33 ms
+  P95 Latency:   10.65 ms
+  Threads fairness:
+        events (avg/stddev):           2308.0000/11.90
+        execution time (avg/stddev):   9.9882/0.01
+
+[Memory Test]
+  Total operations: 2621440 (5975281.74 per second)
+  Transferred:      20480.00 MiB (46681.89 MiB/sec)
+  Avg Latency:      0.00 ms
+  P95 Latency:      0 ms
+
+[IO Test]
+  Read IOPS:        18183.74
+  Write IOPS:       12122.49
+  Total IOPS:       30306.23
+  Read BW:          284.12 MB/s
+  Write BW:         189.41 MB/s
+  Total BW:         473.53 MB/s
+  Avg Latency:      5301.20 ms
+
+[Threads Test]
+  Events/sec:     3392.10
+  Avg Latency:    29.45 ms
+  P95 Latency:    108.68 ms
+
+[Mutex Test]
+  Transactions:   100
+  TPS:            18.25
+  Avg Latency:    5301.20 ms
+  P95 Latency:    5409.26 ms
+
+[Network Test]
+  Test not executed or failed
+
+================================================================================
+                           End of Report
+================================================================================
+Report Generated: Thu Apr 16 01:55:12 PM CST 2026
+================================================================================
