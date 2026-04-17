@@ -1,23 +1,36 @@
-# Database System Benchmark Tool
+# 数据库系统基准测试工具
 
-A system-level performance benchmarking tool designed for Vastbase, openGauss, and PostgreSQL databases, supporting both quick acceptance and production baseline modes to help evaluate server hardware performance boundaries.
+一个为 Vastbase、openGauss 和 PostgreSQL 数据库设计的系统级性能基准测试工具，支持全面的性能测试，帮助评估服务器硬件性能边界。
 
 ## 特性
 
-- ✅ **双模式支持**：快速验收（仅 sysbench）/ 生产基线（fio + sysbench + iperf3）
+- ✅ **统一配置**：通过单一配置文件控制所有测试参数
 - ✅ **一键执行**：自动化完成 CPU/内存/IO/网络/线程/锁测试
-- ✅ **配置灵活**：通过配置文件控制测试项、参数、时长
-- ✅ **最小依赖**：快速模式仅需 sysbench
-- ✅ **多格式报告**：TXT（快速查看）/ JSON（机器可读）
+- ✅ **灵活扩展**：支持命令行参数覆盖配置文件设置
+- ✅ **最小依赖**：基础模式仅需 sysbench
+- ✅ **多工具支持**：IO 测试支持 sysbench 和 fio
 - ✅ **多服务器支持**：网络压测支持多 IP 配置（需 SSH 免密）
+- ✅ **详细报告**：生成结构化测试报告
+
+## 项目结构
+
+```
+vb_benchmark/
+├── vb_benchmark              # 主入口脚本
+├── parameter.conf            # 统一参数配置文件
+├── output/                   # 测试结果输出目录
+├── tools/
+│   └── skill.md              # 开发规范文档
+├── README.md                 # 中文文档（默认）
+└── README.en.md              # 英文文档
+```
 
 ## 快速开始
 
-### 1. Installation
+### 1. 安装依赖
 
-### Method 1: Package Manager (Recommended)
+#### 基础依赖（必选）
 
-#### Quick Mode (Minimum Dependencies)
 ```bash
 # CentOS/RHEL
 sudo yum install -y sysbench
@@ -26,7 +39,8 @@ sudo yum install -y sysbench
 sudo apt-get install -y sysbench
 ```
 
-#### Production Mode (Full Dependencies)
+#### 完整依赖（推荐）
+
 ```bash
 # CentOS/RHEL
 sudo yum install -y sysbench fio iperf3 jq
@@ -35,468 +49,235 @@ sudo yum install -y sysbench fio iperf3 jq
 sudo apt-get install -y sysbench fio iperf3 jq
 ```
 
-### 2. Supported Databases
+### 2. 支持的数据库
 
-- ✅ **Vastbase**：Huawei enterprise-grade database
-- ✅ **openGauss**：Open source relational database
-- ✅ **PostgreSQL**：Open source object-relational database
+- ✅ **Vastbase**：华为企业级数据库
+- ✅ **openGauss**：开源关系型数据库
+- ✅ **PostgreSQL**：开源对象关系型数据库
 
-### 方式二：源码编译安装（当包管理器不可用时）
+### 3. 运行测试
 
-**适用场景**：
-- 包管理器中 sysbench 版本过旧
-- 系统无法访问外部 YUM/APT 源
-- 需要自定义编译选项
-
-**注意事项**：
-- 以下步骤需要 root 用户执行（依赖安装）
-- vastbase 用户执行编译和安装
-- 如果已安装 sysbench，请跳过此步骤
-
-#### 1. 安装编译依赖
-
-**CentOS/RHEL 系列：**
-```bash
-sudo yum install -y make automake libtool pkgconfig libaio-devel
-```
-
-**Ubuntu/Debian 系列：**
-```bash
-sudo apt install -y make automake libtool pkg-config libaio-dev
-```
-
-#### 2. 解压源码包（vastbase 用户）
+#### 基本用法
 
 ```bash
-# 切换到 vastbase 用户
-su - vastbase
-
-# 进入 vb_benchmark 目录
-cd /home/vastbase/project/script/vb_benchmark
-
-# 解压 sysbench 源码
-tar -zxvf sysbench-1.0.20.tar.gz
-cd sysbench-1.0.20
-```
-
-#### 3. 编译和安装
-
-```bash
-# 配置编译选项
-./configure --prefix=/usr/local --with-pgsql --without-mysql
-
-# 编译（使用所有 CPU 核心加速）
-make -j$(nproc)
-
-# 安装（需要 sudo 权限）
-sudo make install
-```
-
-#### 4. 配置环境变量
-
-```bash
-# 加载环境变量（sysbench 已安装到系统路径，此步骤可选）
-source ~/.bashrc
-```
-
-#### 5. 验证安装
-
-```bash
-# 检查 sysbench 版本
-sysbench --version
-
-# 应该输出：sysbench 1.0.20
-```
-
-#### 一键安装脚本
-
-可以将上述步骤整合为一个脚本：
-
-```bash
-# root 用户执行（安装依赖）
-sudo yum install -y make automake libtool pkgconfig libaio-devel  # CentOS
-# 或
-sudo apt install -y make automake libtool pkg-config libaio-dev   # Ubuntu
-
-# vastbase 用户执行（编译安装）
-su - vastbase << 'EOF'
-cd /home/vastbase/project/script/vb_benchmark
-tar -zxvf sysbench-1.0.20.tar.gz
-cd sysbench-1.0.20
-./configure --prefix=/usr/local --with-pgsql --without-mysql
-make -j$(nproc)
-sudo make install
-source ~/.bashrc
-sysbench --version
-EOF
-```
-
-### 2. 运行测试
-
-#### 快速验收模式（默认）
-```bash
-cd /home/vastbase/project/script/vb_benchmark
 ./vb_benchmark
 ```
 
-#### 生产基线模式
+#### 使用配置文件
+
 ```bash
-./vb_benchmark -m production
+./vb_benchmark -c parameter.conf
+# 或使用完整路径
+./vb_benchmark -c path/parameter.conf
 ```
 
-#### 深度测试模式
+#### 命令行参数覆盖
+
 ```bash
-./vb_benchmark -m deep
+# 覆盖测试时长
+./vb_benchmark DURATION=60
+
+# 覆盖 CPU 最大素数
+./vb_benchmark CPU_MAX_PRIME=10000
+
+# 禁用特定测试
+./vb_benchmark MEMORY_ENABLED=false NETWORK_ENABLED=false
+
+# 使用 fio 进行 IO 测试
+./vb_benchmark IO_TOOL=fio
+
+# 设置 fio 测试时长和目录
+./vb_benchmark IO_TOOL=fio IO_TEST_PATH=/data FIO_DURATION=30
+
+# 网络测试
+./vb_benchmark NETWORK_ENABLED=true NETWORK_SERVER_IP=192.168.1.1
 ```
 
-#### 环境检查（空跑）
+#### 干运行模式
+
 ```bash
-./vb_benchmark --dry-run
+./vb_benchmark -d
 ```
 
-#### 自定义配置文件
+### 4. 查看报告
+
 ```bash
-./vb_benchmark -c ./my_config.conf
+ls -lh output/
+cat output/report_benchmark_*.txt
 ```
-
-### 3. 查看报告
-```bash
-ls -lh output/reports/
-cat output/reports/benchmark_*.txt
-```
-
-## 测试模式说明
-
-### 快速验收模式（quick）
-- **依赖**：仅 sysbench
-- **时长**：5-10 分钟
-- **场景**：新服务器快速验收、CI/CD 集成
-- **测试项**：CPU、内存、IO（sysbench fileio）、线程、互斥锁
-
-### 生产基线模式（production）
-- **依赖**：sysbench + fio + iperf3
-- **时长**：30-60 分钟
-- **场景**：生产环境性能基线、容量规划
-- **测试项**：CPU、内存、IO（fio）、网络、线程、互斥锁
-
-### 深度测试模式（deep）
-- **依赖**：sysbench + fio + iperf3
-- **时长**：2 小时
-- **场景**：全面评估硬件性能边界、性能调优
-- **测试项**：CPU、内存、IO（完整 fio 测试集）、网络、线程、互斥锁
 
 ## 配置说明
 
-### 内置配置文件
+### 统一配置文件
 
-| 配置文件 | 模式 | 依赖 | 时长 |
-|----------|------|------|------|
-| config/quick.conf | quick | sysbench | 5-10 分钟 |
-| config/production.conf | production | sysbench+fio+iperf3 | 30-60 分钟 |
-| config/deep.conf | deep | sysbench+fio+iperf3 | 2 小时 |
+项目使用单一配置文件 `config/parameter.conf` 控制所有测试参数。配置文件包含详细的英文注释。
 
 ### 详细参数说明
 
+#### 核心参数
+
+| 参数          | 说明        | 默认值      | 示例           |
+| ----------- | --------- | -------- | ------------ |
+| DURATION    | 统一测试时长（秒） | 10       | 60           |
+| OUTPUT\_DIR | 输出目录路径    | ./output | /var/results |
+| CLEANUP     | 测试后清理临时文件 | true     | true/false   |
+
 #### CPU 测试参数
 
-| 参数 | 说明 | 默认值 | 示例 |
-|------|------|--------|------|
-| CPU_ENABLED | 是否启用 CPU 测试 | true | true/false |
-| CPU_DURATION | 测试时长（秒） | 10 | 60 |
-| CPU_MAX_PRIME | 最大素数（越大测试越复杂） | 20000 | 100000 |
-| CPU_THREADS | 测试线程数（0 表示自动） | 0 | 4 |
-
-**CPU_MAX_PRIME 含义**：CPU 测试通过计算素数来评估性能，值越大计算越复杂，测试持续时间越长，能更充分测试 CPU 性能。
+| 参数              | 说明              | 默认值   | 示例         |
+| --------------- | --------------- | ----- | ---------- |
+| CPU\_ENABLED    | 是否启用 CPU 测试     | true  | true/false |
+| CPU\_THREADS    | CPU 测试线程数（0=自动） | 0     | 8          |
+| CPU\_MAX\_PRIME | CPU 测试最大素数      | 20000 | 10000      |
 
 #### 内存测试参数
 
-| 参数 | 说明 | 默认值 | 示例 |
-|------|------|--------|------|
-| MEMORY_ENABLED | 是否启用内存测试 | true | true/false |
-| MEMORY_DURATION | 测试时长（秒） | 10 | 60 |
-| MEMORY_BLOCK_SIZE | 内存块大小 | "8K" | "4K", "16K" |
-| MEMORY_TOTAL_SIZE | 测试总内存大小 | "20G" | "10G", "50G" |
-| MEMORY_OPER | 内存操作类型 | "read" | "read", "write" |
-| MEMORY_THREADS | 测试线程数 | 10 | 20 |
-
-**MEMORY_OPER 支持值**：
-- `read`：只读测试
-- `write`：只写测试
+| 参数                  | 说明            | 默认值  | 示例         |
+| ------------------- | ------------- | ---- | ---------- |
+| MEMORY\_ENABLED     | 是否启用内存测试      | true | true/false |
+| MEMORY\_THREADS     | 内存测试线程数（0=自动） | 0    | 8          |
+| MEMORY\_BLOCK\_SIZE | 块大小           | 8K   | 4K/8K/16K  |
+| MEMORY\_TOTAL\_SIZE | 总测试大小         | 20G  | 10G/20G    |
+| MEMORY\_OPER        | 内存操作类型        | read | read/write |
 
 #### IO 测试参数
 
-| 参数 | 说明 | 默认值 | 示例 |
-|------|------|--------|------|
-| IO_ENABLED | 是否启用 IO 测试 | true | true/false |
-| IO_TOOL | IO 测试工具 | "sysbench" | "sysbench", "fio" |
-| IO_DURATION | 测试时长（秒） | 10 | 600 |
-| IO_TOTAL_SIZE | 测试文件总大小 | "100M" | "1G", "10G" |
-| IO_TEST_MODE | 测试模式 | "rndrw" | "read", "write", "rndrd", "rndwr", "rndrw" |
-| IO_FILE_NUM | 测试文件数量 | 1 | 10 |
-| IO_BLOCK_SIZE | 块大小 | "16K" | "4K", "64K" |
-| IO_THREADS | 测试线程数 | 4 | 8 |
-
-#### 线程测试参数
-
-| 参数 | 说明 | 默认值 | 示例 |
-|------|------|--------|------|
-| THREADS_ENABLED | 是否启用线程测试 | true | true/false |
-| THREADS_DURATION | 测试时长（秒） | 10 | 60 |
-| THREADS_NUM | 线程数量 | 100 | 1000 |
-| THREAD_YIELDS | 线程让出 CPU 次数（越大上下文切换越多） | 100 | 500 |
-| THREAD_LOCKS | 共享锁数量（越大竞争越激烈） | 4 | 8 |
-
-#### 互斥锁测试参数
-
-| 参数 | 说明 | 默认值 | 示例 |
-|------|------|--------|------|
-| MUTEX_ENABLED | 是否启用互斥锁测试 | true | true/false |
-| MUTEX_DURATION | 测试时长（秒） | 10 | 60 |
-| MUTEX_NUM | 互斥锁数量 | 1024 | 2048 |
-| MUTEX_THREADS | 测试线程数 | 100 | 500 |
+| 参数              | 说明          | 默认值        | 示例               |
+| --------------- | ----------- | ---------- | ---------------- |
+| IO\_ENABLED     | 是否启用 IO 测试  | true       | true/false       |
+| IO\_TOOL        | IO 测试工具     | sysbench   | sysbench/fio     |
+| IO\_TOTAL\_SIZE | IO 测试文件总大小  | 1G         | 1G/10G           |
+| IO\_TEST\_MODE  | 测试模式        | rndrw      | rndrw/read/write |
+| IO\_FILE\_NUM   | 测试文件数量      | 1          | 4                |
+| IO\_TEST\_PATH  | 测试目录路径      | /tmp       | /data            |
+| FIO\_DURATION   | fio 测试时长（秒） | 同 DURATION | 30               |
 
 #### 网络测试参数
 
-| 参数 | 说明 | 默认值 | 示例 |
-|------|------|--------|------|
-| NETWORK_ENABLED | 是否启用网络测试 | true | true/false |
-| NETWORK_TOOL | 网络测试工具 | "iperf3" | "iperf3" |
-| NETWORK_MODE | 测试模式 | "single" | "single", "multi-server" |
-| NETWORK_DURATION | 测试时长（秒） | 20 | 60 |
-| NETWORK_PORT | 测试端口 | 25201 | 5201 |
-| NETWORK_PROTOCOL | 网络协议 | "tcp" | "tcp", "udp" |
-| NETWORK_PARALLEL | 并行连接数 | 1 | 4 |
-| NETWORK_SERVER_IP | 服务器 IP（空值自动检测） | "" | "192.168.1.100" |
-| NETWORK_CLIENT_IP | 客户端 IP（空值使用服务器 IP，支持多个 IP 空格分隔） | "" | "192.168.1.101 192.168.1.102" |
+| 参数                  | 说明                   | 默认值   | 示例                            |
+| ------------------- | -------------------- | ----- | ----------------------------- |
+| NETWORK\_ENABLED    | 是否启用网络测试             | false | true/false                    |
+| NETWORK\_SERVER\_IP | 服务器 IP（空值自动检测）       | ""    | "192.168.1.100"               |
+| NETWORK\_CLIENT\_IP | 客户端 IP（支持多个 IP 空格分隔） | ""    | "192.168.1.101 192.168.1.102" |
+| NETWORK\_PORT       | 测试端口                 | 25201 | 5201                          |
+| NETWORK\_PARALLEL   | 并行连接数                | 1     | 4                             |
 
-**NETWORK_MODE 说明**：
-- `single`：单服务器模式，支持多客户端 IP（通过 NETWORK_CLIENT_IP 配置）
-- `multi-server`：多服务器分布式测试，需要配置 SERVERS 和 TEST_SCENARIOS
+#### 线程测试参数
 
-### 自定义配置示例
+| 参数               | 说明           | 默认值  | 示例         |
+| ---------------- | ------------ | ---- | ---------- |
+| THREADS\_ENABLED | 是否启用线程测试     | true | true/false |
+| THREADS\_NUM     | 线程数          | 1000 | 1000       |
+| THREADS\_YIELDS  | 每线程 yield 次数 | 100  | 100        |
+| THREADS\_LOCKS   | 锁数量          | 4    | 4          |
 
-编辑配置文件（如 `config/quick.conf`）：
+#### 互斥锁测试参数
 
-```bash
-# CPU 测试
-CPU_ENABLED=true
-CPU_DURATION=60
-CPU_MAX_PRIME=100000
-CPU_THREADS=0  # 自动检测
+| 参数             | 说明             | 默认值  | 示例         |
+| -------------- | -------------- | ---- | ---------- |
+| MUTEX\_ENABLED | 是否启用互斥锁测试      | true | true/false |
+| MUTEX\_THREADS | 互斥锁测试线程数（0=自动） | 0    | 8          |
+| MUTEX\_NUM     | 互斥锁数量          | 1024 | 1024       |
 
-# 内存测试
-MEMORY_ENABLED=true
-MEMORY_DURATION=30
-MEMORY_OPER="write"  # 测试写性能
-MEMORY_THREADS=20
+#### pgbench 测试参数
 
-# IO 测试
-IO_ENABLED=true
-IO_TOOL="fio"
-IO_DURATION=600
-IO_TOTAL_SIZE="10G"
-IO_FILE_NUM=10
-
-# 网络测试
-NETWORK_ENABLED=true
-NETWORK_CLIENT_IP="192.168.1.101 192.168.1.102"  # 多客户端测试
-```
+| 参数                | 说明                | 默认值         | 示例         |
+| ----------------- | ----------------- | ----------- | ---------- |
+| PGBENCH\_ENABLED  | 是否启用 pgbench 测试   | false       | true/false |
+| PGBENCH\_DB       | pgbench 数据库名      | pgbench\_db | mydb       |
+| PGBENCH\_THREADS  | pgbench 线程数（0=自动） | 0           | 8          |
+| PGBENCH\_DURATION | pgbench 测试时长（秒）   | 300         | 300        |
 
 ## 输出指标说明
 
 ### CPU 测试
+
 - **events/sec**：每秒执行事件数（越高越好）
 - **avg latency**：平均延迟（越低越好）
 - **P95/P99 latency**：95/99 百分位延迟（越低越好）
 
 ### 内存测试
+
 - **operations/sec**：每秒内存操作数（越高越好）
 - **throughput**：内存吞吐量 MB/s（越高越好）
 - **avg latency**：平均延迟（越低越好）
 
 ### IO 测试
+
 - **IOPS**：每秒 IO 操作数（越高越好）
 - **Bandwidth**：吞吐量 MB/s（越高越好）
-- **Latency P50/P95/P99**：延迟分布（越低越好）
+- **Latency**：延迟（越低越好）
 
 ### 网络测试
-- **Bandwidth**：网络带宽 Mbps（越高越好）
-- **Jitter**：网络抖动 ms（越低越好）
-- **Packet Loss**：丢包率 %（越低越好）
+
+- **Bandwidth**：网络带宽 MB/s（越高越好）
 
 ### 线程测试
+
 - **events/sec**：每秒线程事件数（越高越好）
 - **latency**：线程调度延迟（越低越好）
 
 ### 互斥锁测试
+
 - **transactions**：事务数（越高越好）
 - **TPS**：每秒事务数（越高越好）
 - **latency**：锁等待延迟（越低越好）
 
+### pgbench 测试
+
+- **TPS**：每秒事务数（越高越好）
+- **latency average**：平均延迟（越低越好）
+
 ## 依赖工具说明
 
-| 工具 | 必选 | 用途 | 安装命令 |
-|------|------|------|----------|
-| sysbench | 是 | CPU/内存/IO/线程/锁测试 | `yum install -y sysbench` |
-| fio | 生产模式 | 专业 IO 压测 | `yum install -y fio` |
-| iperf3 | 生产模式 | 网络吞吐测试 | `yum install -y iperf3` |
-| jq | 推荐 | JSON 结果解析 | `yum install -y jq` |
-| bc | 可选 | 数值计算 | `yum install -y bc` |
+| 工具       | 必选 | 用途               | 安装命令                      |
+| -------- | -- | ---------------- | ------------------------- |
+| sysbench | 是  | CPU/内存/IO/线程/锁测试 | `yum install -y sysbench` |
+| fio      | 可选 | 专业 IO 压测         | `yum install -y fio`      |
+| iperf3   | 可选 | 网络吞吐测试           | `yum install -y iperf3`   |
+| jq       | 推荐 | JSON 结果解析        | `yum install -y jq`       |
 
 ## 常见问题
 
 ### Q1: 测试需要 root 权限吗？
-**A**: 部分测试（如 direct IO）需要 root 权限，建议使用 `sudo` 运行：
-```bash
-sudo ./vb_benchmark -m production
-```
+
+**A**: 部分测试（如 direct IO）需要 root 权限，建议使用 `sudo` 运行
 
 ### Q2: 测试会删除数据吗？
-**A**: 测试文件仅写入指定目录（默认 `/tmp`），测试完成后可自动清理。建议指定 `IO_TEST_PATH` 到独立测试分区。
+
+**A**: 测试文件仅写入指定目录（默认 `/tmp`），测试完成后可自动清理
 
 ### Q3: 如何自定义 IO 测试路径？
-**A**: 编辑配置文件，设置 `IO_TEST_PATH`：
-```bash
-IO_TEST_PATH="/data/vastbase_benchmark"
-```
 
-### Q4: 网络测试如何配置服务器 IP？
-**A**: 在配置文件中设置 `NETWORK_SERVER_IP`：
-```bash
-NETWORK_SERVER_IP="192.168.1.100"
-```
+**A**: 使用 `IO_TEST_PATH` 参数：`./vb_benchmark IO_TEST_PATH=/data`
 
-### Q5: 多服务器网络测试如何使用？
-**A**: 配置 SSH 免密登录，然后设置：
-```bash
-NETWORK_MODE="multi-server"
-SERVERS="192.168.1.100:server:db_master,192.168.1.110:client:app_server"
-TEST_SCENARIOS="192.168.1.110:192.168.1.100:60"
-```
+### Q4: 网络测试如何配置多客户端？
 
-### Q6: 为什么 fio 测试结果与 sysbench fileio 差异很大？
-**A**: fio 是专业 IO 压测工具，配置更灵活（direct=1、libaio 引擎），结果更接近数据库真实负载。sysbench fileio 适合快速测试，不建议用于生产环境评估。
-
-### Q7: 如何解读 P95/P99 延迟？
-**A**: P95 延迟表示 95% 的请求延迟低于该值，P99 表示 99% 的请求延迟低于该值。对于数据库来说，P99 延迟比平均延迟更重要，因为它反映了长尾延迟问题。
-
-## 报告示例
-
-```
-================================================================================
-                    Vastbase System Benchmark Report
-================================================================================
-
-基本信息
---------
-测试模式：production
-测试时间：2026-04-14_10:30:00
-主机名：db-server-01
-CPU 核心数：8
-内存大小：32768 MB
-
-================================================================================
-                           测试结果汇总
-================================================================================
-
-[CPU 测试]
-  事件/秒：    15234.56
-  平均延迟：   3.2ms
-  P95 延迟：   4.5ms
-  P99 延迟：   6.8ms
-
-[内存测试]
-  操作/秒：    8765.43
-  传输量：     10240 MB
-  平均延迟：   1.2ms
-
-[IO 测试]
-  测试工具：  fio
-
-  [randread]
-    读 IOPS:      45000
-    写 IOPS:      0
-    读带宽：     350 MB/s
-    读 P95 延迟：120000 ns
-
-  [randwrite]
-    读 IOPS:      0
-    写 IOPS:      32000
-    读带宽：     0 MB/s
-    写 P95 延迟：150000 ns
-
-  [mixed_rw]
-    读 IOPS:      38000
-    写 IOPS:      16000
-    读带宽：     295 MB/s
-    读 P95 延迟：135000 ns
-
-[网络测试]
-  带宽：       950.5 Mbps
-  抖动：       0.15 ms
-  丢包率：     0.00%
-
-[线程测试]
-  事件/秒：    5678.90
-  平均延迟：   2.1ms
-  P95 延迟：   3.2ms
-
-[互斥锁测试]
-  事务数：     123456
-  事务/秒：    2054.32
-  平均延迟：   1.8ms
-  P95 延迟：   2.5ms
-
-================================================================================
-```
-
-## 项目结构
-
-```
-vb_benchmark/
-├── vb_benchmark              # 主入口脚本
-├── lib/                      # 库函数模块
-│   ├── config.sh            # 配置解析
-│   ├── utils.sh             # 通用工具
-│   ├── env_checker.sh       # 环境检测
-│   ├── cpu_test.sh          # CPU 测试
-│   ├── mem_test.sh          # 内存测试
-│   ├── io_test.sh           # IO 测试
-│   ├── net_test.sh          # 网络测试
-│   ├── threads_test.sh      # 线程测试
-│   ├── mutex_test.sh        # 互斥锁测试
-│   ├── result_parser.sh     # 结果解析
-│   └── report.sh            # 报告生成
-├── config/                   # 配置文件
-│   ├── quick.conf           # 快速模式
-│   ├── production.conf      # 生产模式
-│   └── deep.conf            # 深度模式
-├── output/                   # 测试结果
-│   ├── reports/             # 报告文件
-│   ├── logs/                # 日志文件
-│   └── data/                # 原始数据
-└── README.md                # 使用说明
-```
+**A**: 使用 `NETWORK_CLIENT_IP` 参数：`NETWORK_CLIENT_IP="192.168.1.101 192.168.1.102"`
 
 ## 最佳实践
 
 1. **测试环境**：在独立测试环境运行，避免影响生产业务
-2. **测试时长**：生产环境建议使用 production 模式，至少运行 30 分钟
+2. **测试时长**：生产环境建议使用较长的测试时长（如 60 秒以上）
 3. **IO 测试路径**：使用数据库数据目录所在分区，结果更具参考价值
-4. **历史对比**：定期运行测试，保存 JSON 报告用于历史趋势分析
+4. **历史对比**：定期运行测试，保存报告用于历史趋势分析
 5. **多机测试**：网络压测前配置好 SSH 免密登录
 6. **结果解读**：重点关注 P95/P99 延迟，而非仅看平均值
+7. **参数调整**：根据服务器配置调整测试参数，如线程数应与 CPU 核心数匹配
 
 ## 许可证
 
-MIT License
+本项目采用 GNU General Public License v3.0 许可证。
 
-## 贡献
+## 版本历史
 
-欢迎提交 Issue 和 Pull Request！
+| 标签    | 日期         | 变更                                                 |
+| ----- | ---------- | -------------------------------------------------- |
+| 0.2.0 | 2026-04-17 | 重构移除 lib 目录，将所有函数合并到主脚本，添加命令行参数支持及覆盖功能，更新文档为中英文双版本 |
+| 0.1.0 | 2026-04-16 | 初始版本，包含基本基准测试功能                                    |
 
----
+***
 
-**版本**: v1.0.0  
-**创建日期**: 2026-04-14  
-**维护团队**: Vastbase 性能诊断与自动化运维团队
+**版本**: v2.0.0
+**创建日期**: 2026-04-17
+**维护团队**: Vastbase 二线团队

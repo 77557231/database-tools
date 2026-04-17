@@ -1,125 +1,1294 @@
 #!/bin/bash
 #--------------------------------------------------------------------------------
 #-- File name:   vb_benchmark
-#-- Version:     v1.0.0
-#-- Purpose:     Vastbase System Benchmark Tool
+#-- Version:     v2.0.0
+#-- Purpose:     Database System Benchmark Tool
 #-- Author:      Vastbase Performance Team
-#-- Description: 一键式系统压测工具，支持快速验收和生产基线两种模式
+#-- Description: One-click system benchmarking tool, supports configuration via config file or command line parameters
 #--------------------------------------------------------------------------------
 
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# 加载库函数
-source "$SCRIPT_DIR/lib/utils.sh"
-source "$SCRIPT_DIR/lib/config.sh"
-source "$SCRIPT_DIR/lib/env_checker.sh"
-source "$SCRIPT_DIR/lib/io_test.sh"
-source "$SCRIPT_DIR/lib/net_test.sh"
-source "$SCRIPT_DIR/lib/threads_test.sh"
-source "$SCRIPT_DIR/lib/mutex_test.sh"
-source "$SCRIPT_DIR/lib/result_parser.sh"
-source "$SCRIPT_DIR/lib/report.sh"
-
-# 默认参数
-MODE="quick"
+# Default parameters
 CONFIG_FILE=""
 OUTPUT_DIR="./output"
 DRY_RUN=false
 
-# 立即 export 供库函数使用
+# Export immediately for library functions
 export OUTPUT_DIR
+
+# Parse command line arguments
+parse_args() {
+    local OPTIND=1
+    local remaining_args=()
+    
+    # First pass: extract options and their arguments
+    while [ $OPTIND -le $# ]; do
+        case "${!OPTIND}" in
+            --)
+                # End of options
+                local OPTIND=$((OPTIND + 1))
+                break
+                ;;
+            --*)
+                # Long options
+                local opt="${!OPTIND}"
+                local opt_name="${opt:2}"
+                case "$opt_name" in
+                    help)
+                        show_help
+                        exit 0
+                        ;;
+                    dry-run)
+                        DRY_RUN=true
+                        ;;
+                    *)
+                        echo "Unknown option: $opt"
+                        show_help
+                        exit 1
+                        ;;
+                esac
+                local OPTIND=$((OPTIND + 1))
+                ;;
+            -[codh])
+                # Single letter options (no argument)
+                local opt_char="${!OPTIND:1:1}"
+                case "$opt_char" in
+                    d)
+                        DRY_RUN=true
+                        ;;
+                    h)
+                        show_help
+                        exit 0
+                        ;;
+                esac
+                local OPTIND=$((OPTIND + 1))
+                ;;
+            -[co])
+                # Options that require an argument
+                local opt_char="${!OPTIND:1:1}"
+                local OPTIND=$((OPTIND + 1))
+                local opt_arg="${!OPTIND}"
+                case "$opt_char" in
+                    c)
+                        CONFIG_FILE="$opt_arg"
+                        ;;
+                    o)
+                        OUTPUT_DIR="$opt_arg"
+                        ;;
+                esac
+                local OPTIND=$((OPTIND + 1))
+                ;;
+            -[^-]*)
+                # Unknown option starting with single dash
+                echo "Unknown option: ${!OPTIND}"
+                show_help
+                exit 1
+                ;;
+            *)
+                remaining_args+=("${!OPTIND}")
+                local OPTIND=$((OPTIND + 1))
+                ;;
+        esac
+    done
+    
+    # Process remaining arguments as KEY=VALUE pairs
+    for arg in "${remaining_args[@]}"; do
+        if [[ "$arg" =~ ^([A-Z_]+)=(.*)$ ]]; then
+            local key="${BASH_REMATCH[1]}"
+            local value="${BASH_REMATCH[2]}"
+            export "$key"="$value"
+        fi
+    done
+}
 
 # Show help information
 show_help() {
-    cat << EOF
-Vastbase System Benchmark Tool (vb_benchmark)
-
-Usage:
-  vb_benchmark [options]
-
-Options:
-  -m, --mode <MODE>       Test mode (quick|production|deep), default: quick
-  -c, --config <FILE>     Custom configuration file path
-  -o, --output <DIR>      Output directory, default: ./output
-  --dry-run               Dry-run mode (environment check only)
-  -h, --help              Show this help message
-
-Test Modes:
-  quick       Quick acceptance mode, sysbench only, 5-10 minutes
-  production  Production baseline mode, sysbench+fio+iperf3, 30-60 minutes
-  deep        Deep test mode, comprehensive performance evaluation, 2 hours
-
-Examples:
-  vb_benchmark                        # Quick acceptance mode
-  vb_benchmark -m production          # Production baseline mode
-  vb_benchmark --dry-run              # Environment check
-  vb_benchmark -c ./my_config.conf    # Custom configuration
-
-Dependencies:
-  Quick mode: sysbench
-  Production mode: sysbench, fio, iperf3, jq (recommended)
-EOF
+    echo "Usage: $0 [options] [KEY=VALUE ...]"
+    echo ""
+    echo "Support three configuration modes: parameter mode and configuration file mode, or mixed mode."
+    echo "When both parameters and configuration file are configured, parameters will override configuration file."
+    echo ""
+    echo "Options:"
+    echo "  -c <config_file>  Specify configuration file path (default: config/parameter.conf)"
+    echo "  -o <output_dir>   Specify output directory path (default: ./output)"
+    echo "  -d                Dry run mode (show commands without execution)"
+    echo "  -h                Show this help message"
+    echo ""
+    echo "Test parameters (KEY=VALUE format):"
+    echo "  === Core ==="
+    echo "  DURATION=<seconds>          Unified test duration (default: 10)"
+    echo "  OUTPUT_DIR=<path>           Output directory (default: ./output)"
+    echo "  CLEANUP=true|false          Cleanup temp files after test (default: true)"
+    echo ""
+    echo "  === CPU Test ==="
+    echo "  CPU_ENABLED=true|false      Enable CPU test (default: true)"
+    echo "  CPU_THREADS=<number>        CPU test threads, 0=auto (default: 0)"
+    echo "  CPU_MAX_PRIME=<number>      Max prime number for CPU test (default: 20000)"
+    echo ""
+    echo "  === Memory Test ==="
+    echo "  MEMORY_ENABLED=true|false   Enable Memory test (default: true)"
+    echo "  MEMORY_THREADS=<number>     Memory test threads, 0=auto (default: 0)"
+    echo "  MEMORY_BLOCK_SIZE=<size>    Block size, e.g. 8K (default: 8K)"
+    echo "  MEMORY_TOTAL_SIZE=<size>    Total test size, e.g. 20G (default: 20G)"
+    echo "  MEMORY_OPER=read|write      Memory operation (default: read)"
+    echo ""
+    echo "  === IO Test ==="
+    echo "  IO_ENABLED=true|false       Enable IO test (default: true)"
+    echo "  IO_TOOL=sysbench|fio        IO test tool (default: sysbench)"
+    echo "  IO_TOTAL_SIZE=<size>        Total file size for IO test (default: 1G)"
+    echo "  IO_TEST_MODE=<mode>         Test mode: rndrw|read|write (default: rndrw)"
+    echo "  IO_FILE_NUM=<number>        Number of test files (default: 1)"
+    echo "  IO_TEST_PATH=<path>         Test directory path (default: /tmp)"
+    echo "  FIO_DURATION=<seconds>      fio test duration (default: same as DURATION)"
+    echo ""
+    echo "  === Network Test ==="
+    echo "  NETWORK_ENABLED=true|false  Enable Network test (default: false)"
+    echo "  NETWORK_SERVER_IP=<ip>     Network server IP address"
+    echo "  NETWORK_CLIENT_IP=<ips>     Network client IP addresses (space-separated)"
+    echo "  NETWORK_PORT=<port>        Test port (default: 25201)"
+    echo "  NETWORK_PARALLEL=<number>  Parallel connections (default: 1)"
+    echo ""
+    echo "  === Threads Test ==="
+    echo "  THREADS_ENABLED=true|false  Enable Threads test (default: true)"
+    echo "  THREADS_NUM=<number>        Number of threads (default: 1000)"
+    echo "  THREADS_YIELDS=<number>     Number of yields per thread (default: 100)"
+    echo "  THREADS_LOCKS=<number>      Number of locks (default: 4)"
+    echo ""
+    echo "  === Mutex Test ==="
+    echo "  MUTEX_ENABLED=true|false    Enable Mutex test (default: true)"
+    echo "  MUTEX_THREADS=<number>      Mutex test threads, 0=auto (default: 0)"
+    echo "  MUTEX_NUM=<number>          Number of mutexes (default: 1024)"
+    echo ""
+    echo "  === pgbench Test ==="
+    echo "  PGBENCH_ENABLED=true|false  Enable pgbench test (default: false)"
+    echo "  PGBENCH_DB=<database>       pgbench database name (default: pgbench_db)"
+    echo "  PGBENCH_THREADS=<number>    pgbench threads, 0=auto (default: 0)"
+    echo "  PGBENCH_DURATION=<seconds>  pgbench test duration (default: 300)"
+    echo ""
+    echo "Examples:"
+    echo "  $0 -c parameter.conf DURATION=30 CPU_MAX_PRIME=10000"
+    echo "  $0 DURATION=60 CPU_ENABLED=true MEMORY_ENABLED=false"
+    echo "  $0 IO_TOOL=fio IO_TEST_PATH=/data FIO_DURATION=30"
+    echo "  $0 NETWORK_ENABLED=true NETWORK_SERVER_IP=\"192.168.1.1\"\"192.168.1.2\""
+    echo ""
+    echo "Project structure:"
+    echo "  vb_benchmark/"
+    echo "  ├── parameter.conf       Unified parameter configuration"
+    echo "  ├── output/                   Test results output directory"
+    echo "  ├── tools/"
+    echo "  │   └── skill.md              Development documentation"
+    echo "  ├── README.md                 Documentation (Chinese)"
+    echo "  └── README.en.md              Documentation (English)"
 }
 
-# Command line argument parsing
-while [[ $# -gt 0 ]]; do
-    case $1 in
-        -m|--mode)
-            MODE="$2"
-            shift 2
-            ;;
-        -c|--config)
-            CONFIG_FILE="$2"
-            shift 2
-            ;;
-        -o|--output)
-            OUTPUT_DIR="$2"
-            shift 2
-            ;;
-        --dry-run)
-            DRY_RUN=true
-            shift
-            ;;
-        -h|--help)
-            show_help
-            exit 0
-            ;;
-        *)
-            echo "Error: Unknown option: $1"
-            show_help
+# Check if command exists
+check_command() {
+    local cmd="$1"
+    local install_hint="$2"
+    
+    if command -v "$cmd" &> /dev/null; then
+        return 0
+    else
+        if [ -n "$install_hint" ]; then
+            echo "警告：命令 '$cmd' 未安装。$install_hint"
+        else
+            echo "警告：命令 '$cmd' 未安装"
+        fi
+        return 1
+    fi
+}
+
+# Get CPU core count
+get_cpu_cores() {
+    nproc 2>/dev/null || grep -c ^processor /proc/cpuinfo 2>/dev/null || echo "unknown"
+}
+
+# Get memory size (MB)
+get_memory_size_mb() {
+    if [ -f /proc/meminfo ]; then
+        awk '/MemTotal/ {printf "%.0f", $2/1024}' /proc/meminfo 2>/dev/null
+    else
+        echo "unknown"
+    fi
+}
+
+# Get disk available space (KB)
+get_disk_available_kb() {
+    local path="${1:-/tmp}"
+    df -P "$path" | awk 'NR==2 {print $4}'
+}
+
+# Log output functions
+log_info() {
+    echo "[INFO] $(date '+%Y-%m-%d %H:%M:%S') - $1"
+}
+
+log_error() {
+    echo "[ERROR] $(date '+%Y-%m-%d %H:%M:%S') - $1" >&2
+}
+
+log_warn() {
+    echo "[WARN] $(date '+%Y-%m-%d %H:%M:%S') - $1"
+}
+
+# Cleanup test file
+cleanup_file() {
+    local file="$1"
+    if [ -f "$file" ]; then
+        rm -f "$file"
+    fi
+}
+
+# Cleanup test directory
+cleanup_dir() {
+    local dir="$1"
+    if [ -d "$dir" ]; then
+        rm -rf "$dir"
+    fi
+}
+
+# Execute command function (supports dry run mode)
+run_command() {
+    local cmd="$1"
+    local output_file="$2"
+    
+    if [ "$DRY_RUN" = true ]; then
+        echo "[DRY RUN] $cmd"
+        return 0
+    fi
+    
+    if [ -n "$output_file" ]; then
+        eval "$cmd" > "$output_file" 2>&1
+    else
+        eval "$cmd"
+    fi
+}
+
+# 等待命令执行完成（带超时）
+wait_with_timeout() {
+    local pid="$1"
+    local timeout="$2"
+    local start_time=$(date +%s)
+    
+    while kill -0 "$pid" 2>/dev/null; do
+        local current_time=$(date +%s)
+        local elapsed=$((current_time - start_time))
+        
+        if [ "$elapsed" -ge "$timeout" ]; then
+            kill -9 "$pid" 2>/dev/null
+            return 1
+        fi
+        
+        sleep 1
+    done
+    
+    return 0
+}
+
+# 加载配置文件
+load_config() {
+    local mode="$1"
+    local config_file="$2"
+    
+    if [ -n "$config_file" ]; then
+        if [ ! -f "$config_file" ]; then
+            echo "错误：配置文件不存在：$config_file"
             exit 1
+        fi
+        source "$config_file"
+    else
+        # 使用 SCRIPT_DIR 变量（在主脚本中设置）
+        local default_config="${SCRIPT_DIR}/config/${mode}.conf"
+        if [ ! -f "$default_config" ]; then
+            echo "错误：默认配置文件不存在：$default_config"
+            exit 1
+        fi
+        source "$default_config"
+    fi
+    
+    # 设置默认值
+    OUTPUT_DIR="${OUTPUT_DIR:-./output}"
+    FORMAT="${FORMAT:-txt}"
+    CLEANUP="${CLEANUP:-true}"
+}
+
+# 解析多服务器配置
+# 格式：IP:ROLE:描述，多个服务器用逗号分隔
+parse_servers() {
+    local servers_str="${SERVERS:-}"
+    if [ -z "$servers_str" ]; then
+        echo ""
+        return
+    fi
+    
+    local IFS=','
+    for server in $servers_str; do
+        local ip=$(echo "$server" | cut -d: -f1)
+        local role=$(echo "$server" | cut -d: -f2)
+        local desc=$(echo "$server" | cut -d: -f3)
+        echo "$ip|$role|$desc"
+    done
+}
+
+# 解析测试场景配置
+# 格式：CLIENT_IP:SERVER_IP:Duration (Duration is optional)
+parse_test_scenarios() {
+    local scenarios_str="${TEST_SCENARIOS:-}"
+    if [ -z "$scenarios_str" ]; then
+        echo ""
+        return
+    fi
+    
+    local IFS=','
+    for scenario in $scenarios_str; do
+        local client_ip=$(echo "$scenario" | cut -d: -f1)
+        local server_ip=$(echo "$scenario" | cut -d: -f2)
+        local duration=$(echo "$scenario" | cut -d: -f3)
+        echo "$client_ip|$server_ip|$duration"
+    done
+}
+
+# Check all dependencies
+check_all() {
+    echo "=== Checking Dependencies ==="
+    check_dependencies
+    
+    echo ""
+    echo "=== Checking Permissions ==="
+    check_permissions
+    
+    echo ""
+    echo "=== Checking Disk Space ==="
+    check_disk_space
+    
+    echo ""
+    echo "=== Checking Network Connectivity ==="
+    check_network
+}
+
+# Check dependencies
+check_dependencies() {
+    local has_error=false
+    
+    # sysbench is required
+    if check_command "sysbench" "Please run: sudo yum install -y sysbench"; then
+        echo "✓ sysbench installed"
+    else
+        has_error=true
+    fi
+    
+    # Additional tools required for production mode
+    if [ "$MODE" = "production" ] || [ "$MODE" = "deep" ]; then
+        if check_command "fio" "Please run: sudo yum install -y fio"; then
+            echo "✓ fio installed"
+        else
+            has_error=true
+        fi
+        
+        if check_command "iperf3" "Please run: sudo yum install -y iperf3"; then
+            echo "✓ iperf3 installed"
+        else
+            has_error=true
+        fi
+        
+        if check_command "jq" "Please run: sudo yum install -y jq"; then
+            echo "✓ jq installed"
+        else
+            echo "⚠ jq not installed (recommended for JSON parsing)"
+        fi
+    fi
+    
+    if [ "$has_error" = true ]; then
+        echo ""
+        echo "Error: Missing required dependencies, please install before running"
+        return 1
+    fi
+    
+    return 0
+}
+
+# Check permissions
+check_permissions() {
+    # Check root permission
+    if [ "$EUID" -ne 0 ]; then
+        echo "⚠ Running as non-root user, some tests may fail"
+        echo "  Suggestion: Run with 'sudo vb_benchmark ...'"
+    else
+        echo "✓ Root permission check passed"
+    fi
+    
+    # Check test directory write permission
+    local test_path="${IO_TEST_PATH:-/tmp}"
+    if [ ! -w "$test_path" ]; then
+        echo "✗ No write permission for test directory: $test_path"
+        return 1
+    else
+        echo "✓ Test directory write permission check passed: $test_path"
+    fi
+}
+
+# Check disk space
+check_disk_space() {
+    local test_path="${IO_TEST_PATH:-/tmp}"
+    local available_kb=$(get_disk_available_kb "$test_path")
+    local available_gb=$((available_kb / 1024 / 1024))
+    
+    # Calculate required space based on mode
+    local required_gb=0
+    case $MODE in
+        quick)
+            required_gb=2
+            ;;
+        production)
+            required_gb=10
+            ;;
+        deep)
+            required_gb=50
             ;;
     esac
-done
+    
+    if [ "$available_gb" -lt "$required_gb" ]; then
+        echo "✗ Insufficient disk space"
+        echo "  Available: ${available_gb}GB"
+        echo "  Required: ${required_gb}GB"
+        return 1
+    else
+        echo "✓ Disk space check passed: ${available_gb}GB available, ${required_gb}GB required"
+    fi
+}
 
-# CPU test function
+# Check network connectivity
+check_network() {
+    # If can ping localhost, consider network OK
+    if ping -c 1 127.0.0.1 &> /dev/null; then
+        echo "✓ Network connectivity check passed"
+    else
+        echo "⚠ Network connectivity check failed"
+    fi
+}
+
+# Parse CPU result
+parse_cpu_result() {
+    local result_file="$1"
+    
+    local events_per_sec=$(grep "events per second" "$result_file" 2>/dev/null | awk -F: '{print $2}' | tr -d ' ')
+    local avg_latency=$(grep "avg:" "$result_file" 2>/dev/null | head -1 | awk '{print $NF}' | tr -d ',')
+    local p95_latency=$(grep "95th percentile" "$result_file" 2>/dev/null | awk '{print $NF}')
+    local p99_latency=$(grep "99th percentile" "$result_file" 2>/dev/null | awk '{print $NF}')
+    
+    # Extract Threads fairness metrics
+    local threads_fairness_events=$(grep -A2 "Threads fairness:" "$result_file" 2>/dev/null | grep "events" | head -1)
+    local threads_fairness_time=$(grep -A2 "Threads fairness:" "$result_file" 2>/dev/null | grep "execution time" | head -1)
+    
+    # Display detailed summary
+    echo ""
+    echo "CPU test summary:"
+    echo "  CPU speed:"
+    echo "    events per second: $events_per_sec"
+    echo "  Avg Latency: ${avg_latency}ms"
+    echo "  P95 Latency: ${p95_latency}ms"
+    if [ -n "$p99_latency" ] && [ "$p99_latency" != "0" ]; then
+        echo "  P99 Latency: ${p99_latency}ms"
+    fi
+    echo "  Threads fairness:"
+    if [ -n "$threads_fairness_events" ]; then
+        echo "    $threads_fairness_events"
+    fi
+    if [ -n "$threads_fairness_time" ]; then
+        echo "    $threads_fairness_time"
+    fi
+}
+
+# Parse memory result
+parse_memory_result() {
+    local result_file="$1"
+    
+    # Extract Total operations and operations per second
+    local total_ops_line=$(grep "Total operations:" "$result_file" 2>/dev/null)
+    local total_ops=$(echo "$total_ops_line" | awk '{print $3}')
+    local ops_per_sec=$(echo "$total_ops_line" | awk -F'[()]' '{print $2}' | awk '{print $1}')
+    
+    # Extract transferred data and MiB/sec
+    local transferred_line=$(grep "MiB transferred" "$result_file" 2>/dev/null)
+    local transferred=$(echo "$transferred_line" | awk '{print $1}')
+    local mib_per_sec=$(echo "$transferred_line" | awk -F'[()]' '{print $2}' | awk '{print $1}')
+    
+    local avg_latency=$(grep "avg:" "$result_file" 2>/dev/null | head -1 | awk '{print $NF}' | tr -d ',')
+    
+    # Extract p95 latency
+    local p95_latency=$(grep "95th percentile" "$result_file" 2>/dev/null | awk '{print $NF}')
+    
+    # Display detailed summary
+    echo ""
+    echo "Memory test summary:"
+    echo "  Total operations: ${total_ops} (${ops_per_sec} per second)"
+    echo "  Transferred: ${transferred} MiB (${mib_per_sec} MiB/sec)"
+    echo "  Avg Latency: ${avg_latency}ms"
+    echo "  P95 Latency: ${p95_latency:-0}ms"
+}
+
+# Append result to combined results file
+append_to_combined_result() {
+    local section_title="$1"
+    local result_file="$2"
+    local combined_file="$OUTPUT_DIR/data_${TIMESTAMP}_all_results.txt"
+    
+    echo "" >> "$combined_file"
+    echo "================================================================================" >> "$combined_file"
+    echo "$section_title" >> "$combined_file"
+    echo "================================================================================" >> "$combined_file"
+    if [ -f "$result_file" ]; then
+        cat "$result_file" >> "$combined_file"
+    fi
+    echo "" >> "$combined_file"
+}
+
+# Parse all results (summary call)
+parse_all_results() {
+    echo "Parsing test results..."
+    
+    # Parsing functions for each test are called in corresponding modules
+    # Additional summary processing can be done here
+    
+    echo "✓ Result parsing completed"
+}
+
+# IO test function
+run_io_test() {
+    echo "=== IO Performance Test ==="
+    
+    local io_tool="${IO_TOOL:-sysbench}"
+    local duration="${DURATION:-10}"
+    
+    if [ "$io_tool" = "fio" ]; then
+        FIO_DURATION="${FIO_DURATION:-$duration}" run_fio_test
+    else
+        IO_DURATION="${IO_DURATION:-$duration}" run_sysbench_fileio
+    fi
+}
+
+# sysbench fileio test
+run_sysbench_fileio() {
+    local temp_output_file="/tmp/vb_fileio_${TIMESTAMP}.txt"
+    
+    echo "Starting fileio test..."
+    echo "  File size: ${IO_TOTAL_SIZE:-1G}, Test mode: ${IO_TEST_MODE:-rndrw}"
+    
+    # Prepare test files first
+    run_command "sysbench fileio \
+        --file-total-size=\"${IO_TOTAL_SIZE:-1G}\" \
+        --file-test-mode=\"${IO_TEST_MODE:-rndrw}\" \
+        --file-num=\"${IO_FILE_NUM:-1}\" \
+        prepare" "/dev/null"
+    
+    # Run test
+    run_command "sysbench fileio \
+        --file-total-size=\"${IO_TOTAL_SIZE:-1G}\" \
+        --file-test-mode=\"${IO_TEST_MODE:-rndrw}\" \
+        --time=\"${IO_DURATION:-120}\" \
+        --file-num=\"${IO_FILE_NUM:-1}\" \
+        run" "$temp_output_file"
+    
+    # Cleanup test files
+    run_command "sysbench fileio \
+        --file-total-size=\"${IO_TOTAL_SIZE:-1G}\" \
+        --file-test-mode=\"${IO_TEST_MODE:-rndrw}\" \
+        --file-num=\"${IO_FILE_NUM:-1}\" \
+        cleanup" "/dev/null"
+    
+    # Parse result and display detailed output
+    if [ "$DRY_RUN" != true ] && [ -f "$temp_output_file" ]; then
+        parse_sysbench_fileio_result "$temp_output_file"
+        
+        # Append to combined results file
+        append_to_combined_result "SYSBENCH FILEIO TEST RESULTS" "$temp_output_file"
+    fi
+    
+    # Cleanup temp file
+    rm -f "$temp_output_file"
+    
+    echo "✓ IO test completed"
+}
+
+# fio test
+run_fio_test() {
+    echo "[fio] Starting test..."
+    
+    # Check if fio is installed
+    if ! command -v fio &> /dev/null; then
+        echo "Error: fio not installed, please run: sudo yum install -y fio"
+        return 1
+    fi
+    
+    # Iterate through all profiles
+    local profiles="${FIO_PROFILES:-randread}"
+    
+    for profile in $profiles; do
+        echo "  Executing profile: $profile"
+        
+        # Generate fio configuration
+        local fio_conf="/tmp/fio_${profile}.fio"
+        local rw_type=$(eval echo "\$FIO_${profile^^}_RW")
+        local bs=$(eval echo "\$FIO_${profile^^}_BS")
+        local iodepth=$(eval echo "\$FIO_${profile^^}_IODEPTH")
+        local numjobs=$(eval echo "\$FIO_${profile^^}_NUMJOBS")
+        
+        # Set default values
+        rw_type="${rw_type:-randread}"
+        bs="${bs:-8K}"
+        iodepth="${iodepth:-64}"
+        numjobs="${numjobs:-4}"
+        
+        cat > "$fio_conf" << EOF
+[global]
+ioengine=libaio
+direct=1
+size=${IO_FILE_SIZE:-10G}
+runtime=${FIO_DURATION:-300}
+time_based
+group_reporting
+
+[${profile}]
+rw=${rw_type}
+bs=${bs}
+iodepth=${iodepth}
+numjobs=${numjobs}
+filename=${IO_TEST_PATH:-/tmp}/fio_test_${profile}
+EOF
+        
+        # Show configuration file content (also shown in dry run mode)
+        echo "  Configuration file: $fio_conf"
+        echo "  Config content:"
+        echo "  ----------------"
+        cat "$fio_conf"
+        echo "  ----------------"
+        echo
+        
+        # Run fio test
+        local json_output="$OUTPUT_DIR/fio_${profile}_result.json"
+        run_command "fio \"$fio_conf\" --output=\"$json_output\" --output-format=json" "/dev/null"
+        
+        # Cleanup temporary files (also cleanup in dry run mode)
+        rm -f "$fio_conf"
+        
+        # Parse result
+        if [ "$DRY_RUN" != true ] && [ -f "$json_output" ]; then
+            parse_fio_result "$json_output" "$profile"
+        fi
+    done
+    
+    echo "✓ fio test completed"
+}
+
+# Parse sysbench fileio result
+parse_sysbench_fileio_result() {
+    local result_file="$1"
+    
+    # Extract metrics
+    local read_iops=$(grep "reads/s:" "$result_file" 2>/dev/null | awk '{print $NF}' || echo "0")
+    local write_iops=$(grep "writes/s:" "$result_file" 2>/dev/null | awk '{print $NF}' || echo "0")
+    local total_iops=$(awk "BEGIN {printf \"%.2f\", $read_iops + $write_iops}")
+    local read_bw=$(grep "read, MiB/s:" "$result_file" 2>/dev/null | awk '{print $NF}' || echo "0")
+    local write_bw=$(grep "written, MiB/s:" "$result_file" 2>/dev/null | awk '{print $NF}' || echo "0")
+    local total_bw=$(awk "BEGIN {printf \"%.2f\", $read_bw + $write_bw}")
+    local avg_latency=$(grep "avg:" "$result_file" 2>/dev/null | head -1 | awk '{print $NF}' | tr -d ',' || echo "0")
+    
+    # Display summary
+    echo ""
+    echo "IO test results:"
+    echo "  Read IOPS: $read_iops"
+    echo "  Write IOPS: $write_iops"
+    echo "  Total IOPS: $total_iops"
+    echo "  Read BW: ${read_bw}MB/s"
+    echo "  Write BW: ${write_bw}MB/s"
+    echo "  Total BW: ${total_bw}MB/s"
+    echo "  Avg Latency: ${avg_latency}ms"
+}
+
+# Parse fio result
+parse_fio_result() {
+    local json_file="$1"
+    local profile="$2"
+    
+    # Check if jq is installed
+    if ! command -v jq &> /dev/null; then
+        echo "  ⚠ jq not installed, skipping detailed parsing"
+        return
+    fi
+    
+    if [ ! -f "$json_file" ]; then
+        echo "  ⚠ Result file not found: $json_file"
+        return
+    fi
+    
+    # Extract metrics
+    local read_iops=$(jq -r '.jobs[0].read.iops // 0' "$json_file" 2>/dev/null)
+    local write_iops=$(jq -r '.jobs[0].write.iops // 0' "$json_file" 2>/dev/null)
+    local read_bw=$(jq -r '.jobs[0].read.bw_bytes // 0' "$json_file" 2>/dev/null)
+    local write_bw=$(jq -r '.jobs[0].write.bw_bytes // 0' "$json_file" 2>/dev/null)
+    local read_lat_p50=$(jq -r '.jobs[0].read.lat_ns.percentile."50.000000" // 0' "$json_file" 2>/dev/null)
+    local read_lat_p95=$(jq -r '.jobs[0].read.lat_ns.percentile."95.000000" // 0' "$json_file" 2>/dev/null)
+    local read_lat_p99=$(jq -r '.jobs[0].read.lat_ns.percentile."99.000000" // 0' "$json_file" 2>/dev/null)
+    local write_lat_p50=$(jq -r '.jobs[0].write.lat_ns.percentile."50.000000" // 0' "$json_file" 2>/dev/null)
+    local write_lat_p95=$(jq -r '.jobs[0].write.lat_ns.percentile."95.000000" // 0' "$json_file" 2>/dev/null)
+    local write_lat_p99=$(jq -r '.jobs[0].write.lat_ns.percentile."99.000000" // 0' "$json_file" 2>/dev/null)
+    
+    # Save metrics (uppercase profile name as prefix)
+    local prefix="FIO_${profile^^}"
+    echo "${prefix}_READ_IOPS=${read_iops}" >> "$OUTPUT_DIR/metrics.env"
+    echo "${prefix}_WRITE_IOPS=${write_iops}" >> "$OUTPUT_DIR/metrics.env"
+    echo "${prefix}_READ_BW_BPS=${read_bw}" >> "$OUTPUT_DIR/metrics.env"
+    echo "${prefix}_WRITE_BW_BPS=${write_bw}" >> "$OUTPUT_DIR/metrics.env"
+    echo "${prefix}_READ_LAT_P50_NS=${read_lat_p50}" >> "$OUTPUT_DIR/metrics.env"
+    echo "${prefix}_READ_LAT_P95_NS=${read_lat_p95}" >> "$OUTPUT_DIR/metrics.env"
+    echo "${prefix}_READ_LAT_P99_NS=${read_lat_p99}" >> "$OUTPUT_DIR/metrics.env"
+    echo "${prefix}_WRITE_LAT_P50_NS=${write_lat_p50}" >> "$OUTPUT_DIR/metrics.env"
+    echo "${prefix}_WRITE_LAT_P95_NS=${write_lat_p95}" >> "$OUTPUT_DIR/metrics.env"
+    echo "${prefix}_WRITE_LAT_P99_NS=${write_lat_p99}" >> "$OUTPUT_DIR/metrics.env"
+    
+    # Display summary
+    echo ""
+    echo "  fio [$profile] test results:"
+    echo "    Read IOPS: $read_iops"
+    echo "    Write IOPS: $write_iops"
+    echo "    Read BW: $((read_bw / 1024 / 1024))MB/s"
+    echo "    Write BW: $((write_bw / 1024 / 1024))MB/s"
+    echo "    Read P95 Latency: ${read_lat_p95}ns"
+    echo "    Write P95 Latency: ${write_lat_p95}ns"
+}
+
+# Get machine's real IP address
+get_machine_ip() {
+    # Try hostname -I first (returns all IPs), take the first one
+    local ip=$(hostname -I 2>/dev/null | awk '{print $1}')
+    if [ -n "$ip" ]; then
+        echo "$ip"
+        return 0
+    fi
+    
+    # Fallback: try ip route
+    ip=$(ip route get 8.8.8.8 2>/dev/null | grep -oP 'src \K\S+')
+    if [ -n "$ip" ]; then
+        echo "$ip"
+        return 0
+    fi
+    
+    # Last fallback
+    echo "127.0.0.1"
+}
+
+# Display per-second throughput
+display_per_second_throughput() {
+    local text_file="$1"
+    local server_ip="$2"
+    
+    if [ ! -f "$text_file" ]; then
+        return
+    fi
+    
+    echo ""
+    echo "Per-second throughput for $server_ip:"
+    # Extract interval lines showing per-second data (format: [  5] 0.00-1.00 sec XXX MBytes X.XX Gbits/sec)
+    grep "sec" "$text_file" | grep "MBytes" | grep "Gbits/sec" | grep -v "sender\|receiver" | while read -r line; do
+        echo "  $line"
+    done
+}
+
+# Network test function
+run_network_test() {
+    echo "=== Network Performance Test ==="
+    
+    local network_tool="${NETWORK_TOOL:-iperf3}"
+    local network_mode="${NETWORK_MODE:-single}"
+    local network_enabled="${NETWORK_ENABLED:-false}"
+    local network_client_ip="${NETWORK_CLIENT_IP:-}"
+    
+    # Check if network test is enabled
+    if [ "$network_enabled" != "true" ]; then
+        echo "Network test disabled"
+        return 0
+    fi
+    
+    # Skip network test if NETWORK_CLIENT_IP is empty (single machine test has no meaning)
+    if [ -z "$network_client_ip" ]; then
+        echo "Skipping network test: NETWORK_CLIENT_IP is empty (single machine test has no meaning)"
+        return 0
+    fi
+    
+    # Check if iperf3 is installed
+    if ! command -v iperf3 &> /dev/null; then
+        echo "Error: iperf3 not installed, please run: sudo yum install -y iperf3"
+        return 1
+    fi
+    
+    if [ "$network_mode" = "multi-server" ]; then
+        run_multi_server_network_test
+    else
+        run_single_network_test
+    fi
+}
+
+# Single server network test
+run_single_network_test() {
+    local port="${NETWORK_PORT:-25201}"
+    local duration="${DURATION:-20}"
+    local parallel="${NETWORK_PARALLEL:-1}"
+    
+    # Create output directory if it doesn't exist
+    local output_dir="./output"
+    mkdir -p "$output_dir"
+    
+    # Auto-detect server IP if not set
+    local server_ip="${NETWORK_SERVER_IP}"
+    if [ -z "$server_ip" ]; then
+        server_ip=$(get_machine_ip)
+        echo "  Auto-detected server IP: $server_ip"
+    fi
+    
+    # Use server IP as client IP if client IP not set (localhost test)
+    local client_ip="${NETWORK_CLIENT_IP:-$server_ip}"
+    
+    local temp_output_file="/tmp/vb_network_${TIMESTAMP}.txt"
+    local temp_text_output="/tmp/vb_network_text_${TIMESTAMP}.txt"
+    local iperf3_pid=""
+    
+    # Check if multiple client IPs are configured (space-separated)
+    local client_ips=($client_ip)
+    local num_clients=${#client_ips[@]}
+    
+    echo "Starting iperf3 test..."
+    echo "  Server: $server_ip:$port"
+    echo "  Client(s): $client_ip"
+    echo "  Duration: ${duration}s, Parallel connections: $parallel"
+    echo "  Total test scenarios: $num_clients"
+    
+    # Start iperf3 server in background
+    echo "  Starting iperf3 server on port $port..."
+    run_command "iperf3 -s -p \"$port\" -D" "/dev/null"
+    iperf3_pid=$!
+    sleep 2  # Wait for server to start
+    
+    # Verify server is running using pidof (more reliable than pgrep)
+    if ! pidof iperf3 > /dev/null; then
+        echo "⚠ Failed to start iperf3 server"
+        return 1
+    fi
+    
+    # Execute tests for each client IP sequentially
+    local client_idx=0
+    for client in "${client_ips[@]}"; do
+        client_idx=$((client_idx + 1))
+        
+        if [ $num_clients -gt 1 ]; then
+            echo ""
+            echo "  [Test $client_idx/$num_clients] Testing from client: $client"
+        fi
+        
+        # Calculate timeout: duration + 15s buffer for each client
+        local client_timeout=$((duration + 15))
+        local client_output_file="$output_dir/network_scenario_${client_idx}.json"
+        local client_text_output="$output_dir/network_scenario_${client_idx}_text.txt"
+        
+        # Run iperf3 client with timeout and capture both JSON and text output
+        if run_command "timeout $client_timeout iperf3 -c \"$server_ip\" \
+            -p \"$port\" \
+            -t \"$duration\" \
+            -P \"$parallel\" \
+            -J" "$client_output_file"; then
+            
+            # Capture text format output for per-second data
+            run_command "iperf3 -c \"$server_ip\" -p \"$port\" -t \"$duration\" -P \"$parallel\" 2>&1 | grep -v \"^$\"" "$client_text_output"
+            
+            # Parse and display result
+            parse_iperf3_result "$client_output_file"
+            
+            # Display per-second throughput
+            display_per_second_throughput "$client_text_output" "$server_ip (from $client)"
+            
+            # Append to combined results file
+            append_to_combined_result "NETWORK TEST RESULTS ($server_ip from $client)" "$client_text_output"
+            
+            echo "  ✓ Client $client test completed"
+        else
+            echo "  ⚠ Client $client test failed or timed out"
+        fi
+        
+        # Keep the files for report generation
+    done
+    
+    echo ""
+    echo "✓ Network test completed for all clients"
+    
+    # Stop iperf3 server
+    echo "  Stopping iperf3 server..."
+    kill "$iperf3_pid" 2>/dev/null || true
+    pkill -f "iperf3 -s -p $port" 2>/dev/null || true
+    sleep 1
+    
+    return 0
+}
+
+# Multi-server network test
+run_multi_server_network_test() {
+    echo "Starting multi-server network test..."
+    
+    # Create output directory if it doesn't exist
+    local output_dir="./output"
+    mkdir -p "$output_dir"
+    
+    # Parse server list
+    local servers=$(parse_servers)
+    local server_ip=""
+    
+    if [ -z "$servers" ]; then
+        # Generate server list from NETWORK_SERVER_IP and NETWORK_CLIENT_IP
+        server_ip="${NETWORK_SERVER_IP}"
+        local client_ip="${NETWORK_CLIENT_IP}"
+        
+        if [ -z "$server_ip" ]; then
+            server_ip=$(get_machine_ip)
+            echo "  Auto-detected server IP: $server_ip"
+        fi
+        
+        if [ -z "$client_ip" ]; then
+            client_ip="$server_ip"
+            echo "  Auto-detected client IP: $client_ip"
+        fi
+        
+        # Convert client IPs to array
+        local client_ips=($client_ip)
+        
+        # Generate server list
+        echo "  Generating server list from NETWORK_SERVER_IP and NETWORK_CLIENT_IP..."
+        servers=""
+        for client in "${client_ips[@]}"; do
+            servers+="$client|client|"
+        done
+        servers+="$server_ip|server|"
+    else
+        # Extract server IP from server list
+        server_ip=$(echo "$servers" | grep '|server|' | cut -d'|' -f1 | head -1)
+        if [ -z "$server_ip" ]; then
+            server_ip=$(get_machine_ip)
+            echo "  Auto-detected server IP: $server_ip"
+        fi
+    fi
+    
+    # Parse test scenarios
+    local scenarios=$(parse_test_scenarios)
+    local default_duration="${NETWORK_DURATION:-60}"
+    
+    if [ -z "$scenarios" ]; then
+        # Generate test scenarios from server list and NETWORK_DURATION
+        local client_ip="${NETWORK_CLIENT_IP}"
+        
+        if [ -z "$client_ip" ]; then
+            client_ip="$server_ip"
+        fi
+        
+        # Convert client IPs to array
+        local client_ips=($client_ip)
+        
+        # Generate test scenarios
+        echo "  Generating test scenarios from NETWORK_SERVER_IP, NETWORK_CLIENT_IP, and NETWORK_DURATION..."
+        scenarios=""
+        for client in "${client_ips[@]}"; do
+            scenarios+="$client|$server_ip|$default_duration,"
+        done
+        # Remove trailing comma
+        scenarios=${scenarios%,}
+    else
+        # Use default duration if not specified in TEST_SCENARIOS
+        local updated_scenarios=""
+        while IFS='|' read -r client_ip server_ip duration; do
+            if [ -z "$duration" ]; then
+                duration="$default_duration"
+            fi
+            updated_scenarios+="$client_ip|$server_ip|$duration,"
+        done <<< "$(echo "$scenarios" | tr ',' '\n')"
+        # Remove trailing comma
+        scenarios=${updated_scenarios%,}
+    fi
+    
+    # Start iperf3 server in background for local tests
+    local port="${NETWORK_PORT:-25201}"
+    local iperf3_pid=""
+    
+    # Check if port is already in use
+    if lsof -i:$port > /dev/null 2>&1; then
+        echo "  Port $port is already in use, killing existing process..."
+        pkill -f "iperf3 -s -p $port" 2>/dev/null || true
+        pkill iperf3 2>/dev/null || true
+        sleep 2
+    fi
+    
+    echo "  Starting iperf3 server on port $port..."
+    # Start iperf3 server in a different way
+    (iperf3 -s -p "$port" > /tmp/iperf3_server.log 2>&1) &
+    iperf3_pid=$!
+    sleep 3  # Wait for server to start
+    
+    # Verify server is running
+    if ! ps -p "$iperf3_pid" > /dev/null 2>&1; then
+        echo "⚠ Failed to start iperf3 server"
+        echo "  Server log:"
+        cat /tmp/iperf3_server.log 2>/dev/null
+        # Try alternative approach
+        echo "  Trying alternative approach..."
+        iperf3 -s -p "$port" -D > /tmp/iperf3_server_alt.log 2>&1
+        iperf3_pid=$!
+        sleep 2
+        if ! ps -p "$iperf3_pid" > /dev/null 2>&1; then
+            echo "  Alternative approach failed"
+            echo "  Alternative log:"
+            cat /tmp/iperf3_server_alt.log 2>/dev/null
+            return 1
+        fi
+    fi
+    
+    echo "  iperf3 server started successfully with PID: $iperf3_pid"
+    
+    # Execute each test scenario sequentially
+    local scenario_idx=0
+    
+    while IFS='|' read -r client_ip server_ip duration; do
+        scenario_idx=$((scenario_idx + 1))
+        echo ""
+        echo "Executing scenario $scenario_idx: $client_ip -> $server_ip (${duration}s)"
+        
+        # Run iperf3 locally
+        # Note: For remote testing, SSH passwordless login is required
+        echo "  Running network test..."
+        echo "  Command: iperf3 -c $server_ip -p $port -t $duration -J"
+        
+        # Create output directory if it doesn't exist
+        local output_dir="./output"
+        mkdir -p "$output_dir"
+        
+        # Update output file path
+        local output_file="$output_dir/network_scenario_${scenario_idx}.json"
+        
+        # Run iperf3 locally
+        echo "  Running network test locally..."
+        iperf3 -c "$server_ip" -p "$port" -t "$duration" -J > "$output_file" 2>&1
+        
+        # Check if iperf3 command succeeded
+        if [ $? -eq 0 ]; then
+            # Capture text format output for per-second data
+            local text_output="$output_dir/network_scenario_${scenario_idx}_text.txt"
+            iperf3 -c "$server_ip" -p "$port" -t "$duration" 2>&1 | grep -v "^$" > "$text_output"
+            
+            # Parse and display result
+            parse_iperf3_result "$output_file"
+            
+            # Display per-second throughput
+            display_per_second_throughput "$text_output" "$server_ip (from $client_ip)"
+            
+            # Append to combined results file
+            append_to_combined_result "NETWORK TEST RESULTS ($server_ip from $client_ip)" "$text_output"
+            
+            echo "  ✓ Network test completed locally"
+        else
+            echo "  ⚠ iperf3 test failed"
+            
+            # For demonstration, just create an empty file
+            touch "$output_file"
+        fi
+        
+    done <<< "$(echo "$scenarios" | tr ',' '\n')"
+
+    
+    # Stop iperf3 server
+    echo "  Stopping iperf3 server..."
+    kill "$iperf3_pid" 2>/dev/null || true
+    pkill -f "iperf3 -s -p $port" 2>/dev/null || true
+    sleep 1
+    
+    echo ""
+    echo "✓ Multi-server network test completed"
+}
+
+# Parse iperf3 JSON result
+parse_iperf3_result() {
+    local json_file="$1"
+    
+    # Check if jq is installed
+    if ! command -v jq &> /dev/null; then
+        echo "⚠ jq not installed, skipping detailed parsing"
+        return
+    fi
+    
+    if [ ! -f "$json_file" ]; then
+        echo "⚠ Result file not found: $json_file"
+        return
+    fi
+    
+    # Extract metrics
+    local bandwidth_bps=$(jq -r '.end.sum_received.bits_per_second // 0' "$json_file" 2>/dev/null)
+    # Convert bps to MB/s: 1 MB/s = 8,000,000 bps
+    local bandwidth_mbs=$(awk "BEGIN {printf \"%.2f\", $bandwidth_bps / 8000000}" 2>/dev/null || echo "0")
+    
+    # Display summary
+    echo ""
+    echo "Network test results:"
+    echo "  Bandwidth: ${bandwidth_mbs} MB/s"
+    
+    # Only show jitter and packet loss for UDP tests (not applicable for TCP)
+    if [ "${NETWORK_PROTOCOL:-tcp}" = "udp" ]; then
+        local jitter_ms=$(jq -r '.end.sum_received.jitter_ms // 0' "$json_file" 2>/dev/null)
+        local lost_packets=$(jq -r '.end.sum_received.lost_packets // 0' "$json_file" 2>/dev/null)
+        local total_packets=$(jq -r '.end.sum_received.packets // 0' "$json_file" 2>/dev/null)
+        
+        # Calculate packet loss rate
+        local packet_loss="0"
+        if [ "$total_packets" -gt 0 ] 2>/dev/null; then
+            packet_loss=$(awk "BEGIN {printf \"%.2f\", $lost_packets * 100 / $total_packets}" 2>/dev/null || echo "0")
+        fi
+        
+        echo "  Jitter: ${jitter_ms} ms"
+        echo "  Lost Packets: ${lost_packets}"
+        echo "  Packet Loss: ${packet_loss}%"
+    fi
+}
+
+# Threads test function
+run_threads_test() {
+    echo "=== Threads Performance Test ==="
+    
+    local temp_output_file="/tmp/vb_threads_${TIMESTAMP}.txt"
+    local threads="${THREADS_NUM:-1000}"
+    local duration="${DURATION:-10}"
+    
+    echo "Starting threads test..."
+    echo "  Threads: $threads, Duration: ${duration}s, yields: ${THREADS_YIELDS:-100}, locks: ${THREADS_LOCKS:-4}"
+    
+    run_command "sysbench threads \
+        --threads=\"$threads\" \
+        --thread-yields=\"${THREADS_YIELDS:-100}\" \
+        --thread-locks=\"${THREADS_LOCKS:-4}\" \
+        --time=\"${duration}\" \
+        run" "$temp_output_file"
+    
+    # Parse result and display detailed output
+    if [ "$DRY_RUN" != true ] && [ -f "$temp_output_file" ]; then
+        parse_threads_result "$temp_output_file"
+        
+        # Append to combined results file
+        append_to_combined_result "THREADS TEST RESULTS" "$temp_output_file"
+    fi
+    
+    # Cleanup temp file
+    rm -f "$temp_output_file"
+    
+    echo "✓ Threads test completed"
+}
+
+# Parse threads result
+parse_threads_result() {
+    local result_file="$1"
+    
+    # Calculate events per second
+    local total_events=$(grep "total number of events:" "$result_file" | awk '{print $NF}')
+    local total_time=$(grep "total time:" "$result_file" | awk '{print $NF}' | tr -d 's')
+    local events_per_sec=$(awk "BEGIN {printf \"%.2f\", $total_events / $total_time}")
+    
+    # Extract latency metrics
+    local avg_latency=$(grep "avg:" "$result_file" | head -1 | awk '{print $NF}' | tr -d ',')
+    local p95_latency=$(grep "95th percentile" "$result_file" | awk '{print $NF}')
+    
+    # Display detailed summary
+    echo ""
+    echo "Threads test summary:"
+    echo "  Events/sec: $events_per_sec"
+    echo "  Avg Latency: ${avg_latency}ms"
+    echo "  P95 Latency: ${p95_latency}ms"
+}
+
+# Mutex test function
+run_mutex_test() {
+    echo "=== Mutex Performance Test ==="
+    
+    local temp_output_file="/tmp/vb_mutex_${TIMESTAMP}.txt"
+    local threads="${MUTEX_THREADS:-0}"
+    if [ "$threads" -eq 0 ]; then
+        threads=$(get_cpu_cores)
+    fi
+    local duration="${DURATION:-10}"
+    
+    echo "Starting mutex test..."
+    echo "  Threads: $threads, Duration: ${duration}s, mutex num: ${MUTEX_NUM:-1024}"
+    
+    run_command "sysbench mutex \
+        --mutex-num=\"${MUTEX_NUM:-1024}\" \
+        --threads=\"$threads\" \
+        --time=\"${duration}\" \
+        run" "$temp_output_file"
+    
+    # Parse result and display detailed output
+    if [ "$DRY_RUN" != true ] && [ -f "$temp_output_file" ]; then
+        parse_mutex_result "$temp_output_file"
+        
+        # Append to combined results file
+        append_to_combined_result "MUTEX TEST RESULTS" "$temp_output_file"
+    fi
+    
+    # Cleanup temp file
+    rm -f "$temp_output_file"
+    
+    echo "✓ Mutex test completed"
+}
+
+# Parse mutex result
+parse_mutex_result() {
+    local result_file="$1"
+    
+    # Extract metrics (sysbench 1.0.20 format)
+    local transactions=$(grep "total number of events:" "$result_file" 2>/dev/null | awk '{print $NF}' || echo "0")
+    local total_time=$(grep "total time:" "$result_file" 2>/dev/null | awk '{print $NF}' | tr -d 's' || echo "1")
+    local tps=$(awk "BEGIN {printf \"%.2f\", $transactions / $total_time}" 2>/dev/null || echo "0")
+    local avg_latency=$(grep "avg:" "$result_file" 2>/dev/null | head -1 | awk '{print $NF}' | tr -d ',' || echo "0")
+    local p95_latency=$(grep "95th percentile" "$result_file" 2>/dev/null | awk '{print $NF}' || echo "0")
+    
+    # Display detailed summary
+    echo ""
+    echo "Mutex test summary:"
+    echo "  Transactions: $transactions"
+    echo "  TPS: $tps"
+    echo "  Avg Latency: ${avg_latency}ms"
+    echo "  P95 Latency: ${p95_latency}ms"
+}
+
+# CPU 测试函数
 run_cpu_test() {
     echo "=== CPU Performance Test ==="
     
+    local temp_output_file="/tmp/vb_cpu_${TIMESTAMP}.txt"
     local threads="${CPU_THREADS:-0}"
     if [ "$threads" -eq 0 ]; then
         threads=$(get_cpu_cores)
         echo "Auto-detected CPU cores: $threads"
     fi
-    
-    local temp_output_file="/tmp/vb_cpu_${TIMESTAMP}.txt"
+    local duration="${DURATION:-10}"
     
     echo "Starting CPU test..."
-    echo "Threads: $threads, Duration: ${CPU_DURATION:-60}s"
+    echo "  Threads: $threads, Duration: ${duration}s, Max Prime: ${CPU_MAX_PRIME:-20000}"
     
-    sysbench cpu \
-        --cpu-max-prime="${CPU_MAX_PRIME:-20000}" \
-        --threads="$threads" \
-        --time="${CPU_DURATION:-60}" \
-        run > "$temp_output_file" 2>&1
+    run_command "sysbench cpu \
+        --cpu-max-prime=\"${CPU_MAX_PRIME:-20000}\" \
+        --threads=\"$threads\" \
+        --time=\"${duration}\" \
+        run" "$temp_output_file"
     
     # Parse result and display detailed output
-    parse_cpu_result "$temp_output_file"
-    
-    # Append to combined results file
-    append_to_combined_result "CPU TEST RESULTS" "$temp_output_file"
+    if [ "$DRY_RUN" != true ] && [ -f "$temp_output_file" ]; then
+        parse_cpu_result "$temp_output_file"
+        
+        # Append to combined results file
+        append_to_combined_result "CPU TEST RESULTS" "$temp_output_file"
+    fi
     
     # Cleanup temp file
     rm -f "$temp_output_file"
@@ -132,23 +1301,30 @@ run_memory_test() {
     echo "=== Memory Performance Test ==="
     
     local temp_output_file="/tmp/vb_memory_${TIMESTAMP}.txt"
+    local threads="${MEMORY_THREADS:-0}"
+    if [ "$threads" -eq 0 ]; then
+        threads=$(get_cpu_cores)
+    fi
+    local duration="${DURATION:-10}"
     
     echo "Starting memory test..."
-    echo "Block size: ${MEMORY_BLOCK_SIZE:-1M}, Total size: ${MEMORY_TOTAL_SIZE:-10G}, Threads: ${MEMORY_THREADS:-1}"
+    echo "  Threads: $threads, Duration: ${duration}s, Block size: ${MEMORY_BLOCK_SIZE:-8K}"
     
-    sysbench memory \
-        --memory-block-size="${MEMORY_BLOCK_SIZE:-1M}" \
-        --memory-total-size="${MEMORY_TOTAL_SIZE:-10G}" \
-        --memory-oper="${MEMORY_OPER:-read}" \
-        --threads="${MEMORY_THREADS:-1}" \
-        --time="${MEMORY_DURATION:-60}" \
-        run > "$temp_output_file" 2>&1
+    run_command "sysbench memory \
+        --memory-block-size=\"${MEMORY_BLOCK_SIZE:-8K}\" \
+        --memory-total-size=\"${MEMORY_TOTAL_SIZE:-20G}\" \
+        --memory-oper=\"${MEMORY_OPER:-read}\" \
+        --threads=\"$threads\" \
+        --time=\"${duration}\" \
+        run" "$temp_output_file"
     
     # Parse result and display detailed output
-    parse_memory_result "$temp_output_file"
-    
-    # Append to combined results file
-    append_to_combined_result "MEMORY TEST RESULTS" "$temp_output_file"
+    if [ "$DRY_RUN" != true ] && [ -f "$temp_output_file" ]; then
+        parse_memory_result "$temp_output_file"
+        
+        # Append to combined results file
+        append_to_combined_result "MEMORY TEST RESULTS" "$temp_output_file"
+    fi
     
     # Cleanup temp file
     rm -f "$temp_output_file"
@@ -156,86 +1332,443 @@ run_memory_test() {
     echo "✓ Memory test completed"
 }
 
-# Validate mode
-if [[ ! "$MODE" =~ ^(quick|production|deep)$ ]]; then
-    echo "Error: Invalid mode '$MODE', valid options: quick, production, deep"
-    exit 1
-fi
-
-# Load configuration
-load_config "$MODE" "$CONFIG_FILE"
-
-# Environment check
-if [ "$DRY_RUN" = true ]; then
-    echo "=== Environment Check Mode ==="
-    echo ""
-    check_all
-    echo ""
-    echo "✓ Environment check passed!"
-    exit 0
-fi
-
-# 设置时间戳用于统一命名
-TIMESTAMP=$(date +%Y%m%d_%H%M%S)
-export TIMESTAMP
-
-# 创建输出目录（直接使用 output 目录，不再创建子目录）
-mkdir -p "$OUTPUT_DIR"
-
-# 执行测试
-echo "========================================"
-echo "  Vastbase System Benchmark"
-echo "========================================"
-echo "Mode: $MODE"
-echo "Start Time: $(date '+%Y-%m-%d %H:%M:%S')"
-echo "Output Directory: $OUTPUT_DIR"
-echo "========================================"
-echo ""
-
-TEST_START_TIME=$(date +%s)
-
-# 执行各项测试
-if [ "$CPU_ENABLED" = "true" ]; then
-    run_cpu_test
-    echo ""
-fi
-
-if [ "$MEMORY_ENABLED" = "true" ]; then
-    run_memory_test
-    echo ""
-fi
-
-if [ "$IO_ENABLED" = "true" ]; then
-    run_io_test
-    echo ""
-fi
-
-if [ "$NETWORK_ENABLED" = "true" ]; then
-    run_network_test
-    echo ""
-fi
-
-if [ "$THREADS_ENABLED" = "true" ]; then
-    run_threads_test
-    echo ""
-fi
-
-if [ "$MUTEX_ENABLED" = "true" ]; then
-    run_mutex_test
-    echo ""
-fi
+# pgbench test function
+run_pgbench_test() {
+    echo "=== PostgreSQL Benchmark Test ==="
+    
+    local temp_output_file="/tmp/vb_pgbench_${TIMESTAMP}.txt"
+    local db_name="${PGBENCH_DB:-pgbench_db}"
+    local duration="${PGBENCH_DURATION:-300}"
+    local threads="${PGBENCH_THREADS:-0}"
+    
+    if [ "$threads" -eq 0 ]; then
+        threads=$(get_cpu_cores)
+        echo "Auto-detected CPU cores: $threads"
+    fi
+    
+    echo "Starting pgbench test..."
+    echo "  Database: $db_name, Threads: $threads, Duration: ${duration}s"
+    
+    # Create database if it doesn't exist
+    echo "  Creating database $db_name if it doesn't exist..."
+    run_command "psql -c \"CREATE DATABASE $db_name\" 2>/dev/null || true" "/dev/null"
+    
+    # Initialize pgbench schema
+    echo "  Initializing pgbench schema..."
+    run_command "pgbench -i -s 1 $db_name" "/dev/null"
+    
+    # Run pgbench test
+    echo "  Running pgbench benchmark..."
+    run_command "pgbench -c $threads -j $threads -T $duration -r $db_name" "$temp_output_file"
+    
+    # Display result
+    if [ "$DRY_RUN" != true ] && [ -f "$temp_output_file" ]; then
+        echo ""
+        echo "pgbench test results:"
+        cat "$temp_output_file"
+        
+        # Append to combined results file
+        append_to_combined_result "PGBENCH TEST RESULTS" "$temp_output_file"
+    fi
+    
+    # Cleanup temp file
+    rm -f "$temp_output_file"
+    
+    echo "✓ pgbench test completed"
+}
 
 # 生成报告
-generate_report
+generate_report() {
+    local report_file="$OUTPUT_DIR/report_benchmark_${TIMESTAMP}.txt"
+    local combined_file="$OUTPUT_DIR/data_${TIMESTAMP}_all_results.txt"
 
-# 计算总耗时
-TEST_END_TIME=$(date +%s)
-TOTAL_DURATION=$((TEST_END_TIME - TEST_START_TIME))
+    # Get system info
+    local cpu_cores=$(get_cpu_cores 2>/dev/null || echo "N/A")
+    local memory_mb=$(get_memory_size_mb 2>/dev/null || echo "N/A")
 
-echo "========================================"
-echo "  Test Completed!"
-echo "========================================"
-echo "Total Duration: ${TOTAL_DURATION} seconds"
-echo "Report: $OUTPUT_DIR/report_benchmark_${TIMESTAMP}.txt"
-echo "Combined Results: $OUTPUT_DIR/data_${TIMESTAMP}_all_results.txt"
-echo "========================================"
+    # Unified duration
+    local unified_duration="${DURATION:-10}"
+
+    # Generate report
+    cat > "$report_file" << EOF
+================================================================================
+                    Database System Benchmark Report
+================================================================================
+
+Basic Information
+-----------------
+Test Time: $(date '+%Y-%m-%d %H:%M:%S')
+Hostname: ${HOSTNAME:-N/A}
+CPU Cores: ${cpu_cores}
+Memory Size: ${memory_mb} MB
+Config File: ${CONFIG_FILE:-N/A}
+Unified Duration: ${unified_duration}s
+
+================================================================================
+                           Test Configuration
+================================================================================
+
+[CPU Test]
+  Enabled: ${CPU_ENABLED:-true}
+  Threads: $(if [ "${CPU_THREADS:-0}" = "0" ]; then echo "auto ($cpu_cores)"; else echo "${CPU_THREADS}"; fi)
+  Duration: ${unified_duration}s
+  Max Prime: ${CPU_MAX_PRIME:-20000}
+
+[Memory Test]
+  Enabled: ${MEMORY_ENABLED:-true}
+  Block Size: ${MEMORY_BLOCK_SIZE:-8K}
+  Total Size: ${MEMORY_TOTAL_SIZE:-20G}
+  Operation: ${MEMORY_OPER:-read}
+  Duration: ${unified_duration}s
+
+[IO Test]
+  Enabled: ${IO_ENABLED:-true}
+  Tool: ${IO_TOOL:-sysbench}
+  File Size: ${IO_TOTAL_SIZE:-100M}
+  Test Mode: ${IO_TEST_MODE:-rndrw}
+  Duration: $(if [ "${IO_TOOL:-sysbench}" = "fio" ]; then echo "${FIO_DURATION:-$unified_duration}s"; else echo "${unified_duration}s"; fi)
+
+[Network Test]
+  Enabled: ${NETWORK_ENABLED:-true}
+  Tool: ${NETWORK_TOOL:-iperf3}
+  Server: ${NETWORK_SERVER_IP:-auto}
+  Port: ${NETWORK_PORT:-25201}
+  Duration: ${unified_duration}s
+  Parallel: ${NETWORK_PARALLEL:-1}
+
+[Threads Test]
+  Enabled: ${THREADS_ENABLED:-true}
+  Threads: ${THREADS_NUM:-100}
+  Duration: ${unified_duration}s
+  Yields: ${THREADS_YIELDS:-100}
+  Locks: ${THREADS_LOCKS:-4}
+
+[Mutex Test]
+  Enabled: ${MUTEX_ENABLED:-true}
+  Threads: $(if [ "${MUTEX_THREADS:-0}" = "0" ]; then echo "auto ($cpu_cores)"; else echo "${MUTEX_THREADS}"; fi)
+  Duration: ${unified_duration}s
+  Mutex Num: ${MUTEX_NUM:-1024}
+
+[pgbench Test]
+  Enabled: ${PGBENCH_ENABLED:-false}
+  Database: ${PGBENCH_DB:-pgbench_db}
+  Duration: ${PGBENCH_DURATION:-300}s
+  Threads: $(if [ "${PGBENCH_THREADS:-0}" = "0" ]; then echo "auto ($cpu_cores)"; else echo "${PGBENCH_THREADS}"; fi)
+
+================================================================================
+                           Test Results Summary
+================================================================================
+
+[CPU Test]
+EOF
+
+    # Parse CPU results from combined file
+    if [ -f "$combined_file" ]; then
+        local cpu_events=$(grep -A1 "CPU speed:" "$combined_file" 2>/dev/null | grep "events per second" | awk '{print $NF}')
+        local cpu_avg_lat=$(grep -A30 "CPU TEST RESULTS" "$combined_file" 2>/dev/null | grep -A5 "Latency (ms):" | grep "avg:" | awk '{print $NF}')
+        local cpu_p95_lat=$(grep -A30 "CPU TEST RESULTS" "$combined_file" 2>/dev/null | grep "95th percentile" | awk '{print $NF}')
+        local cpu_p99_lat=$(grep -A30 "CPU TEST RESULTS" "$combined_file" 2>/dev/null | grep "99th percentile" | awk '{print $NF}')
+        local cpu_threads_fairness_events=$(grep -A50 "CPU TEST RESULTS" "$combined_file" 2>/dev/null | grep "Threads fairness:" -A2 | grep "events" | head -1)
+        local cpu_threads_fairness_time=$(grep -A50 "CPU TEST RESULTS" "$combined_file" 2>/dev/null | grep "Threads fairness:" -A2 | grep "execution time" | head -1)
+
+        if [ -n "$cpu_events" ]; then
+            cat >> "$report_file" << EOF
+  CPU speed:
+    events per second: ${cpu_events}
+  Avg Latency:   ${cpu_avg_lat:-0} ms
+  P95 Latency:   ${cpu_p95_lat:-0} ms
+EOF
+            if [ -n "$cpu_p99_lat" ] && [ "$cpu_p99_lat" != "0" ]; then
+                echo "  P99 Latency:   ${cpu_p99_lat} ms" >> "$report_file"
+            fi
+            if [ -n "$cpu_threads_fairness_events" ] || [ -n "$cpu_threads_fairness_time" ]; then
+                echo "  Threads fairness:" >> "$report_file"
+                if [ -n "$cpu_threads_fairness_events" ]; then
+                    echo "    ${cpu_threads_fairness_events}" >> "$report_file"
+                fi
+                if [ -n "$cpu_threads_fairness_time" ]; then
+                    echo "    ${cpu_threads_fairness_time}" >> "$report_file"
+                fi
+            fi
+        else
+            echo "  Test not executed" >> "$report_file"
+        fi
+    fi
+
+    cat >> "$report_file" << EOF
+
+[Memory Test]
+EOF
+
+    if [ -f "$combined_file" ]; then
+        # Extract total operations and per second from the output
+        local mem_total_ops_line=$(grep "Total operations:" "$combined_file" 2>/dev/null)
+        local mem_total_ops=$(echo "$mem_total_ops_line" | awk '{print $3}')
+        local mem_ops_sec=$(echo "$mem_total_ops_line" | awk -F'[()]' '{print $2}' | awk '{print $1}')
+        local mem_transferred=$(grep "MiB transferred" "$combined_file" 2>/dev/null | awk '{print $1}')
+        local mem_mib_sec=$(grep "MiB transferred" "$combined_file" 2>/dev/null | awk -F'[()]' '{print $2}' | awk '{print $1}')
+        local mem_avg_lat=$(grep -A30 "MEMORY TEST RESULTS" "$combined_file" 2>/dev/null | grep -A5 "Latency (ms):" | grep "avg:" | awk '{print $NF}')
+        local mem_p95_lat=$(grep -A30 "MEMORY TEST RESULTS" "$combined_file" 2>/dev/null | grep "95th percentile" | awk '{print $NF}')
+
+        if [ -n "$mem_total_ops" ]; then
+            cat >> "$report_file" << EOF
+  Total operations: ${mem_total_ops} (${mem_ops_sec} per second)
+  Transferred:      ${mem_transferred} MiB (${mem_mib_sec} MiB/sec)
+  Avg Latency:      ${mem_avg_lat:-0} ms
+  P95 Latency:      ${mem_p95_lat:-0} ms
+EOF
+        else
+            echo "  Test not executed" >> "$report_file"
+        fi
+    fi
+
+    cat >> "$report_file" << EOF
+
+[IO Test]
+EOF
+
+    if [ -f "$combined_file" ]; then
+        local io_read_iops=$(grep "reads/s:" "$combined_file" 2>/dev/null | awk '{print $NF}')
+        local io_write_iops=$(grep "writes/s:" "$combined_file" 2>/dev/null | awk '{print $NF}')
+        local io_read_bw=$(grep "read, MiB/s:" "$combined_file" 2>/dev/null | awk '{print $NF}')
+        local io_write_bw=$(grep "written, MiB/s:" "$combined_file" 2>/dev/null | awk '{print $NF}')
+        local io_avg_lat=$(grep "avg:" "$combined_file" 2>/dev/null | tail -1 | awk '{print $NF}' | tr -d ',')
+
+        if [ -n "$io_read_iops" ]; then
+            local io_total_iops=$(awk "BEGIN {printf \"%.2f\", $io_read_iops + $io_write_iops}")
+            local io_total_bw=$(awk "BEGIN {printf \"%.2f\", $io_read_bw + $io_write_bw}")
+
+            cat >> "$report_file" << EOF
+  Read IOPS:        ${io_read_iops}
+  Write IOPS:       ${io_write_iops}
+  Total IOPS:       ${io_total_iops}
+  Read BW:          ${io_read_bw} MB/s
+  Write BW:         ${io_write_bw} MB/s
+  Total BW:         ${io_total_bw} MB/s
+  Avg Latency:      ${io_avg_lat:-0} ms
+EOF
+        else
+            echo "  Test not executed" >> "$report_file"
+        fi
+    fi
+
+    cat >> "$report_file" << EOF
+
+[Threads Test]
+EOF
+
+    if [ -f "$combined_file" ]; then
+        local threads_events=$(grep -A30 "THREADS TEST RESULTS" "$combined_file" 2>/dev/null | grep "total number of events:" | awk '{print $NF}')
+        local threads_time=$(grep -A30 "THREADS TEST RESULTS" "$combined_file" 2>/dev/null | grep "total time:" | awk '{print $NF}' | tr -d 's')
+        local threads_avg_lat=$(grep -A30 "THREADS TEST RESULTS" "$combined_file" 2>/dev/null | grep -A5 "Latency (ms):" | grep "avg:" | awk '{print $NF}')
+        local threads_p95_lat=$(grep -A30 "THREADS TEST RESULTS" "$combined_file" 2>/dev/null | grep "95th percentile" | awk '{print $NF}')
+
+        if [ -n "$threads_events" ]; then
+            local threads_eps=$(awk "BEGIN {printf \"%.2f\", $threads_events / ${threads_time:-1}}")
+
+            cat >> "$report_file" << EOF
+  Events/sec:     ${threads_eps}
+  Avg Latency:    ${threads_avg_lat:-0} ms
+  P95 Latency:    ${threads_p95_lat:-0} ms
+EOF
+        else
+            echo "  Test not executed" >> "$report_file"
+        fi
+    fi
+
+    cat >> "$report_file" << EOF
+
+[Mutex Test]
+EOF
+
+    if [ -f "$combined_file" ]; then
+        local mutex_events=$(grep -A30 "MUTEX TEST RESULTS" "$combined_file" 2>/dev/null | grep "total number of events:" | awk '{print $NF}')
+        local mutex_time=$(grep -A30 "MUTEX TEST RESULTS" "$combined_file" 2>/dev/null | grep "total time:" | awk '{print $NF}' | tr -d 's')
+        local mutex_avg_lat=$(grep -A30 "MUTEX TEST RESULTS" "$combined_file" 2>/dev/null | grep -A5 "Latency (ms):" | grep "avg:" | awk '{print $NF}')
+        local mutex_p95_lat=$(grep -A30 "MUTEX TEST RESULTS" "$combined_file" 2>/dev/null | grep "95th percentile" | awk '{print $NF}')
+
+        if [ -n "$mutex_events" ]; then
+            local mutex_tps=$(awk "BEGIN {printf \"%.2f\", $mutex_events / ${mutex_time:-1}}")
+
+            cat >> "$report_file" << EOF
+  Transactions:   ${mutex_events}
+  TPS:            ${mutex_tps}
+  Avg Latency:    ${mutex_avg_lat:-0} ms
+  P95 Latency:    ${mutex_p95_lat:-0} ms
+EOF
+        else
+            echo "  Test not executed" >> "$report_file"
+        fi
+    fi
+
+    cat >> "$report_file" << EOF
+
+[Network Test]
+EOF
+
+    if [ -f "$combined_file" ]; then
+        # Check if network test results exist
+        if grep -q "NETWORK TEST RESULTS" "$combined_file" 2>/dev/null; then
+            # Extract all network test results for each client
+            local found_results=false
+
+            # Get the output directory from the combined file path
+            local output_dir=$(dirname "$combined_file")
+
+            # Get all network test scenarios
+            local scenario_count=$(grep -c "NETWORK TEST RESULTS" "$combined_file")
+
+            # Process each scenario
+            local i=1
+            while [ $i -le $scenario_count ]; do
+                # Find the corresponding JSON file
+                local json_file="$output_dir/network_scenario_${i}.json"
+                local net_bw="0"
+                local client_ip="N/A"
+
+                if [ -f "$json_file" ]; then
+                    # Check if jq is installed
+                    if command -v jq &> /dev/null; then
+                        # Extract bandwidth from JSON file
+                        local bandwidth_bps=$(jq -r '.end.sum_received.bits_per_second // 0' "$json_file" 2>/dev/null)
+                        # Convert bps to MB/s: 1 MB/s = 8,000,000 bps
+                        net_bw=$(awk "BEGIN {printf \"%.2f\", $bandwidth_bps / 8000000}" 2>/dev/null || echo "0")
+                        
+                        # Extract client IP from the file name (assuming format: network_scenario_1.json)
+                        client_ip=$(echo "$json_file" | grep -oP 'network_scenario_\K[0-9]+' | head -1)
+                        if [ -n "$client_ip" ]; then
+                            client_ip="Client $client_ip"
+                        fi
+                    fi
+                fi
+                
+                # Display the result for this client
+                echo "  $client_ip: ${net_bw} MB/s"
+                found_results=true
+                
+                i=$((i + 1))
+            done
+            
+            if [ "$found_results" = false ]; then
+                echo "  Test not executed or no results found"
+            fi
+        else
+            echo "  Test not executed"
+        fi
+    fi
+    
+    # Add pgbench results if available
+    cat >> "$report_file" << EOF
+
+[pgbench Test]
+EOF
+    
+    if [ -f "$combined_file" ]; then
+        if grep -q "PGBENCH TEST RESULTS" "$combined_file" 2>/dev/null; then
+            local pgbench_results=$(grep -A20 "PGBENCH TEST RESULTS" "$combined_file" 2>/dev/null)
+            if [ -n "$pgbench_results" ]; then
+                echo "$pgbench_results" >> "$report_file"
+            else
+                echo "  Test not executed"
+            fi
+        else
+            echo "  Test not executed"
+        fi
+    else
+        echo "  Test not executed"
+    fi
+    
+    # Finalize report
+    cat >> "$report_file" << EOF
+
+================================================================================
+                                End of Report
+================================================================================
+EOF
+    
+    echo "✓ Report generated: $report_file"
+}
+
+# 主函数
+main() {
+    # 解析命令行参数
+    parse_args "$@"
+    
+    # 设置时间戳
+    TIMESTAMP=$(date '+%Y%m%d_%H%M%S')
+    
+    # 创建输出目录
+    mkdir -p "$OUTPUT_DIR"
+    
+    # 加载配置文件
+    if [ -n "$CONFIG_FILE" ]; then
+        load_config "parameter" "$CONFIG_FILE"
+    else
+        # 默认使用 parameter.conf
+        local default_config="${SCRIPT_DIR}/parameter.conf"
+        if [ -f "$default_config" ]; then
+            load_config "parameter" "$default_config"
+        else
+            # 尝试在 config 目录中查找
+            local config_dir_config="${SCRIPT_DIR}/config/parameter.conf"
+            if [ -f "$config_dir_config" ]; then
+                load_config "parameter" "$config_dir_config"
+            else
+                echo "错误：找不到配置文件 parameter.conf"
+                echo "请确保配置文件存在于以下位置之一："
+                echo "  - ${SCRIPT_DIR}/parameter.conf"
+                echo "  - ${SCRIPT_DIR}/config/parameter.conf"
+                exit 1
+            fi
+        fi
+    fi
+    
+    # 再次处理命令行参数，确保覆盖配置文件的值
+    parse_args "$@"
+    
+    # 更新 OUTPUT_DIR 环境变量
+    export OUTPUT_DIR
+    
+    # 运行检查
+    check_all
+    
+    # 运行测试
+    if [ "$CPU_ENABLED" != "false" ]; then
+        run_cpu_test
+    fi
+    
+    if [ "$MEMORY_ENABLED" != "false" ]; then
+        run_memory_test
+    fi
+    
+    if [ "$IO_ENABLED" != "false" ]; then
+        run_io_test
+    fi
+    
+    if [ "$NETWORK_ENABLED" != "false" ]; then
+        run_network_test
+    fi
+    
+    if [ "$THREADS_ENABLED" != "false" ]; then
+        run_threads_test
+    fi
+    
+    if [ "$MUTEX_ENABLED" != "false" ]; then
+        run_mutex_test
+    fi
+    
+    if [ "$PGBENCH_ENABLED" = "true" ]; then
+        run_pgbench_test
+    fi
+    
+    # 生成报告
+    generate_report
+    
+    echo ""
+    echo "=== Benchmark completed successfully! ==="
+    echo "Report: $OUTPUT_DIR/report_benchmark_${TIMESTAMP}.txt"
+    echo "Detailed results: $OUTPUT_DIR/data_${TIMESTAMP}_all_results.txt"
+}
+
+# 执行主函数
+main "$@"
