@@ -16,22 +16,22 @@ Initializing worker threads...
 Threads started!
 
 CPU speed:
-    events per second:   923.73
+    events per second:   882.47
 
 General statistics:
-    total time:                          10.0042s
-    total number of events:              9243
+    total time:                          10.0166s
+    total number of events:              8841
 
 Latency (ms):
-         min:                                    3.04
-         avg:                                    4.33
-         max:                                   35.85
-         95th percentile:                       12.08
-         sum:                                39976.65
+         min:                                    3.05
+         avg:                                    4.53
+         max:                                   63.46
+         95th percentile:                       13.22
+         sum:                                40012.78
 
 Threads fairness:
-    events (avg/stddev):           2310.7500/46.87
-    execution time (avg/stddev):   9.9942/0.01
+    events (avg/stddev):           2210.2500/34.16
+    execution time (avg/stddev):   10.0032/0.00
 
 
 
@@ -55,25 +55,25 @@ Initializing worker threads...
 
 Threads started!
 
-Total operations: 2621440 (9042982.74 per second)
+Total operations: 2621440 (4709468.86 per second)
 
-20480.00 MiB transferred (70648.30 MiB/sec)
+20480.00 MiB transferred (36792.73 MiB/sec)
 
 
 General statistics:
-    total time:                          0.2874s
+    total time:                          0.5544s
     total number of events:              2621440
 
 Latency (ms):
          min:                                    0.00
          avg:                                    0.00
-         max:                                    2.67
+         max:                                   21.61
          95th percentile:                        0.00
-         sum:                                  674.27
+         sum:                                 1452.80
 
 Threads fairness:
     events (avg/stddev):           655360.0000/0.00
-    execution time (avg/stddev):   0.1686/0.00
+    execution time (avg/stddev):   0.3632/0.03
 
 
 
@@ -88,8 +88,8 @@ Initializing random number generator from current time
 
 
 Extra file open flags: (none)
-1 files, 100MiB each
-100MiB total file size
+1 files, 1GiB each
+1GiB total file size
 Block size 16KiB
 Number of IO requests: 0
 Read/Write ratio for combined random IO test: 1.50
@@ -103,51 +103,51 @@ Threads started!
 
 
 File operations:
-    reads/s:                      18241.93
-    writes/s:                     12161.25
-    fsyncs/s:                     304.09
+    reads/s:                      16299.91
+    writes/s:                     10866.64
+    fsyncs/s:                     271.69
 
 Throughput:
-    read, MiB/s:                  285.03
-    written, MiB/s:               190.02
+    read, MiB/s:                  254.69
+    written, MiB/s:               169.79
 
 General statistics:
-    total time:                          10.0013s
-    total number of events:              307184
+    total time:                          10.0016s
+    total number of events:              274489
 
 Latency (ms):
          min:                                    0.00
-         avg:                                    0.03
-         max:                                   61.99
+         avg:                                    0.04
+         max:                                   63.42
          95th percentile:                        0.02
-         sum:                                 9881.80
+         sum:                                 9887.79
 
 Threads fairness:
-    events (avg/stddev):           307184.0000/0.00
-    execution time (avg/stddev):   9.8818/0.00
+    events (avg/stddev):           274489.0000/0.00
+    execution time (avg/stddev):   9.8878/0.00
 
 
 
 ================================================================================
-NETWORK TEST RESULTS (172.16.53.128 from 172.16.54.128)
+NETWORK TEST RESULTS (172.16.53.128 from 172.16.53.128)
 ================================================================================
 Connecting to host 172.16.53.128, port 25201
-[  5] local 172.16.53.128 port 43548 connected to 172.16.53.128 port 25201
+[  5] local 172.16.53.128 port 52916 connected to 172.16.53.128 port 25201
 [ ID] Interval           Transfer     Bitrate         Retr  Cwnd
-[  5]   0.00-1.00   sec  1.82 GBytes  15.7 Gbits/sec    0   3.56 MBytes       
-[  5]   1.00-2.00   sec  1.84 GBytes  15.8 Gbits/sec    0   4.12 MBytes       
-[  5]   2.00-3.00   sec  1.86 GBytes  16.0 Gbits/sec    0   4.12 MBytes       
-[  5]   3.00-4.00   sec  1.90 GBytes  16.3 Gbits/sec    0   4.12 MBytes       
-[  5]   4.00-5.00   sec  1.82 GBytes  15.6 Gbits/sec    0   6.81 MBytes       
-[  5]   5.00-6.00   sec  1.70 GBytes  14.5 Gbits/sec    1   8.31 MBytes       
-[  5]   6.00-7.00   sec   845 MBytes  7.09 Gbits/sec    0   8.31 MBytes       
-[  5]   7.00-8.00   sec  1.12 GBytes  9.63 Gbits/sec    0   8.31 MBytes       
-[  5]   8.00-9.00   sec  1.74 GBytes  15.0 Gbits/sec    0   8.31 MBytes       
-[  5]   9.00-10.00  sec  1.89 GBytes  16.2 Gbits/sec    0   8.31 MBytes       
+[  5]   0.00-1.00   sec  1.65 GBytes  14.2 Gbits/sec    0   1.50 MBytes       
+[  5]   1.00-2.00   sec  1.64 GBytes  14.1 Gbits/sec    0   1.81 MBytes       
+[  5]   2.00-3.00   sec  1.85 GBytes  15.9 Gbits/sec    0   2.12 MBytes       
+[  5]   3.00-4.00   sec  1.92 GBytes  16.5 Gbits/sec    0   2.62 MBytes       
+[  5]   4.00-5.00   sec  1.96 GBytes  16.8 Gbits/sec    0   3.06 MBytes       
+[  5]   5.00-6.00   sec  1.91 GBytes  16.4 Gbits/sec    0   3.06 MBytes       
+[  5]   6.00-7.00   sec  1.39 GBytes  11.9 Gbits/sec    0   7.24 MBytes       
+[  5]   7.00-8.01   sec   675 MBytes  5.66 Gbits/sec    0   8.43 MBytes       
+[  5]   8.01-9.00   sec  1.31 GBytes  11.4 Gbits/sec    1   8.43 MBytes       
+[  5]   9.00-10.00  sec  1.93 GBytes  16.6 Gbits/sec   11   8.43 MBytes       
 - - - - - - - - - - - - - - - - - - - - - - - - -
 [ ID] Interval           Transfer     Bitrate         Retr
-[  5]   0.00-10.00  sec  16.5 GBytes  14.2 Gbits/sec    1             sender
-[  5]   0.00-10.04  sec  16.5 GBytes  14.1 Gbits/sec                  receiver
+[  5]   0.00-10.00  sec  16.2 GBytes  13.9 Gbits/sec   12             sender
+[  5]   0.00-10.04  sec  16.2 GBytes  13.9 Gbits/sec                  receiver
 iperf Done.
 
 
@@ -157,7 +157,7 @@ THREADS TEST RESULTS
 sysbench 1.0.20-9578e16 (using bundled LuaJIT 2.1.0-beta2)
 
 Running the test with following options:
-Number of threads: 100
+Number of threads: 1000
 Initializing random number generator from current time
 
 
@@ -167,19 +167,19 @@ Threads started!
 
 
 General statistics:
-    total time:                          10.0281s
-    total number of events:              29736
+    total time:                          10.2854s
+    total number of events:              26480
 
 Latency (ms):
          min:                                    0.14
-         avg:                                   33.68
-         max:                                  451.83
-         95th percentile:                      110.66
-         sum:                              1001365.12
+         avg:                                  383.33
+         max:                                 4002.89
+         95th percentile:                     1129.24
+         sum:                             10150521.61
 
 Threads fairness:
-    events (avg/stddev):           297.3600/31.96
-    execution time (avg/stddev):   10.0137/0.01
+    events (avg/stddev):           26.4800/7.03
+    execution time (avg/stddev):   10.1505/0.08
 
 
 
@@ -199,18 +199,18 @@ Threads started!
 
 
 General statistics:
-    total time:                          0.6917s
+    total time:                          0.2260s
     total number of events:              4
 
 Latency (ms):
-         min:                                  639.74
-         avg:                                  662.22
-         max:                                  691.62
-         95th percentile:                      694.45
-         sum:                                 2648.89
+         min:                                  211.40
+         avg:                                  218.40
+         max:                                  225.89
+         95th percentile:                      227.40
+         sum:                                  873.59
 
 Threads fairness:
     events (avg/stddev):           1.0000/0.00
-    execution time (avg/stddev):   0.6622/0.02
+    execution time (avg/stddev):   0.2184/0.01
 
 

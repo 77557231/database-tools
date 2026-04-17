@@ -1576,12 +1576,18 @@ main() {
         load_config "parameter" "$CONFIG_FILE"
     else
         # 默认使用 parameter.conf
-        local default_config="${SCRIPT_DIR}/config/parameter.conf"
+        local default_config="${SCRIPT_DIR}/parameter.conf"
         if [ -f "$default_config" ]; then
             load_config "parameter" "$default_config"
         else
-            # 如果没有 parameter.conf，使用 quick.conf
-            load_config "quick"
+            # 尝试在 config 目录中查找
+            local config_dir_config="${SCRIPT_DIR}/config/parameter.conf"
+            if [ -f "$config_dir_config" ]; then
+                load_config "parameter" "$config_dir_config"
+            else
+                # 如果没有 parameter.conf，使用 quick.conf
+                load_config "quick"
+            fi
         fi
     fi
     

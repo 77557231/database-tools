@@ -4,12 +4,12 @@
 
 Basic Information
 -----------------
-Test Time: 2026-04-17 10:09:29
+Test Time: 2026-04-17 10:53:58
 Hostname: vastbase
 CPU Cores: 4
 Memory Size: 7937 MB
-Config File: config/parameter.conf
-Unified Duration: 5s
+Config File: N/A
+Unified Duration: 10s
 
 ================================================================================
                            Test Configuration
@@ -18,42 +18,42 @@ Unified Duration: 5s
 [CPU Test]
   Enabled: true
   Threads: auto (4)
-  Duration: 5s
-  Max Prime: 10000
+  Duration: 10s
+  Max Prime: 20000
 
 [Memory Test]
   Enabled: true
   Block Size: 8K
   Total Size: 20G
   Operation: read
-  Duration: 5s
+  Duration: 10s
 
 [IO Test]
   Enabled: true
   Tool: sysbench
   File Size: 1G
   Test Mode: rndrw
-  Duration: 5s
+  Duration: 10s
 
 [Network Test]
-  Enabled: false
+  Enabled: true
   Tool: iperf3
-  Server: auto
+  Server: 172.16.53.128
   Port: 25201
-  Duration: 5s
+  Duration: 10s
   Parallel: 1
 
 [Threads Test]
   Enabled: true
   Threads: 1000
-  Duration: 5s
+  Duration: 10s
   Yields: 100
   Locks: 4
 
 [Mutex Test]
   Enabled: true
   Threads: auto (4)
-  Duration: 5s
+  Duration: 10s
   Mutex Num: 1024
 
 [pgbench Test]
@@ -68,38 +68,38 @@ Unified Duration: 5s
 
 [CPU Test]
   CPU speed:
-    events per second: 2361.93
-  Avg Latency:   1.69 ms
-  P95 Latency:   3.49 ms
+    events per second: 882.47
+  Avg Latency:   4.53 ms
+  P95 Latency:   13.22 ms
   Threads fairness:
-        events (avg/stddev):           2954.2500/149.69
-        execution time (avg/stddev):   4.9968/0.00
+        events (avg/stddev):           2210.2500/34.16
+        execution time (avg/stddev):   10.0032/0.00
 
 [Memory Test]
-  Total operations: 2621440 (9559829.00 per second)
-  Transferred:      20480.00 MiB (74686.16 MiB/sec)
+  Total operations: 2621440 (4709468.86 per second)
+  Transferred:      20480.00 MiB (36792.73 MiB/sec)
   Avg Latency:      0.00 ms
   P95 Latency:      0 ms
 
 [IO Test]
-  Read IOPS:        15112.54
-  Write IOPS:       10074.89
-  Total IOPS:       25187.43
-  Read BW:          236.13 MB/s
-  Write BW:         157.42 MB/s
-  Total BW:         393.55 MB/s
-  Avg Latency:      656.18 ms
+  Read IOPS:        16299.91
+  Write IOPS:       10866.64
+  Total IOPS:       27166.55
+  Read BW:          254.69 MB/s
+  Write BW:         169.79 MB/s
+  Total BW:         424.48 MB/s
+  Avg Latency:      218.40 ms
 
 [Threads Test]
-  Events/sec:     2605.56
-  Avg Latency:    373.60 ms
-  P95 Latency:    1109.09 ms
+  Events/sec:     2574.52
+  Avg Latency:    383.33 ms
+  P95 Latency:    1129.24 ms
 
 [Mutex Test]
   Transactions:   4
-  TPS:            5.10
-  Avg Latency:    656.18 ms
-  P95 Latency:    787.74 ms
+  TPS:            17.70
+  Avg Latency:    218.40 ms
+  P95 Latency:    227.40 ms
 
 [Network Test]
 
