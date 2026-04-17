@@ -668,7 +668,7 @@ EOF
         echo
         
         # Run fio test
-        local json_output="$OUTPUT_DIR/data/fio_${profile}_result.json"
+        local json_output="$OUTPUT_DIR/fio_${profile}_result.json"
         run_command "fio \"$fio_conf\" --output=\"$json_output\" --output-format=json" "/dev/null"
         
         # Cleanup temporary files (also cleanup in dry run mode)
@@ -738,16 +738,16 @@ parse_fio_result() {
     
     # Save metrics (uppercase profile name as prefix)
     local prefix="FIO_${profile^^}"
-    echo "${prefix}_READ_IOPS=${read_iops}" >> "$OUTPUT_DIR/data/metrics.env"
-    echo "${prefix}_WRITE_IOPS=${write_iops}" >> "$OUTPUT_DIR/data/metrics.env"
-    echo "${prefix}_READ_BW_BPS=${read_bw}" >> "$OUTPUT_DIR/data/metrics.env"
-    echo "${prefix}_WRITE_BW_BPS=${write_bw}" >> "$OUTPUT_DIR/data/metrics.env"
-    echo "${prefix}_READ_LAT_P50_NS=${read_lat_p50}" >> "$OUTPUT_DIR/data/metrics.env"
-    echo "${prefix}_READ_LAT_P95_NS=${read_lat_p95}" >> "$OUTPUT_DIR/data/metrics.env"
-    echo "${prefix}_READ_LAT_P99_NS=${read_lat_p99}" >> "$OUTPUT_DIR/data/metrics.env"
-    echo "${prefix}_WRITE_LAT_P50_NS=${write_lat_p50}" >> "$OUTPUT_DIR/data/metrics.env"
-    echo "${prefix}_WRITE_LAT_P95_NS=${write_lat_p95}" >> "$OUTPUT_DIR/data/metrics.env"
-    echo "${prefix}_WRITE_LAT_P99_NS=${write_lat_p99}" >> "$OUTPUT_DIR/data/metrics.env"
+    echo "${prefix}_READ_IOPS=${read_iops}" >> "$OUTPUT_DIR/metrics.env"
+    echo "${prefix}_WRITE_IOPS=${write_iops}" >> "$OUTPUT_DIR/metrics.env"
+    echo "${prefix}_READ_BW_BPS=${read_bw}" >> "$OUTPUT_DIR/metrics.env"
+    echo "${prefix}_WRITE_BW_BPS=${write_bw}" >> "$OUTPUT_DIR/metrics.env"
+    echo "${prefix}_READ_LAT_P50_NS=${read_lat_p50}" >> "$OUTPUT_DIR/metrics.env"
+    echo "${prefix}_READ_LAT_P95_NS=${read_lat_p95}" >> "$OUTPUT_DIR/metrics.env"
+    echo "${prefix}_READ_LAT_P99_NS=${read_lat_p99}" >> "$OUTPUT_DIR/metrics.env"
+    echo "${prefix}_WRITE_LAT_P50_NS=${write_lat_p50}" >> "$OUTPUT_DIR/metrics.env"
+    echo "${prefix}_WRITE_LAT_P95_NS=${write_lat_p95}" >> "$OUTPUT_DIR/metrics.env"
+    echo "${prefix}_WRITE_LAT_P99_NS=${write_lat_p99}" >> "$OUTPUT_DIR/metrics.env"
     
     # Display summary
     echo ""
@@ -839,7 +839,7 @@ run_single_network_test() {
     
     # Create output directory if it doesn't exist
     local output_dir="./output"
-    mkdir -p "$output_dir/data"
+    mkdir -p "$output_dir"
     
     # Auto-detect server IP if not set
     local server_ip="${NETWORK_SERVER_IP}"
@@ -889,8 +889,8 @@ run_single_network_test() {
         
         # Calculate timeout: duration + 15s buffer for each client
         local client_timeout=$((duration + 15))
-        local client_output_file="$output_dir/data/network_scenario_${client_idx}.json"
-        local client_text_output="$output_dir/data/network_scenario_${client_idx}_text.txt"
+        local client_output_file="$output_dir/network_scenario_${client_idx}.json"
+        local client_text_output="$output_dir/network_scenario_${client_idx}_text.txt"
         
         # Run iperf3 client with timeout and capture both JSON and text output
         if run_command "timeout $client_timeout iperf3 -c \"$server_ip\" \
@@ -937,7 +937,7 @@ run_multi_server_network_test() {
     
     # Create output directory if it doesn't exist
     local output_dir="./output"
-    mkdir -p "$output_dir/data"
+    mkdir -p "$output_dir"
     
     # Parse server list
     local servers=$(parse_servers)
@@ -1066,10 +1066,10 @@ run_multi_server_network_test() {
         
         # Create output directory if it doesn't exist
         local output_dir="./output"
-        mkdir -p "$output_dir/data"
+        mkdir -p "$output_dir"
         
         # Update output file path
-        local output_file="$output_dir/data/network_scenario_${scenario_idx}.json"
+        local output_file="$output_dir/network_scenario_${scenario_idx}.json"
         
         # Run iperf3 locally
         echo "  Running network test locally..."
@@ -1078,7 +1078,7 @@ run_multi_server_network_test() {
         # Check if iperf3 command succeeded
         if [ $? -eq 0 ]; then
             # Capture text format output for per-second data
-            local text_output="$output_dir/data/network_scenario_${scenario_idx}_text.txt"
+            local text_output="$output_dir/network_scenario_${scenario_idx}_text.txt"
             iperf3 -c "$server_ip" -p "$port" -t "$duration" 2>&1 | grep -v "^$" > "$text_output"
             
             # Parse and display result
@@ -1622,7 +1622,7 @@ EOF
             local i=1
             while [ $i -le $scenario_count ]; do
                 # Find the corresponding JSON file
-                local json_file="$output_dir/data/network_scenario_${i}.json"
+                local json_file="$output_dir/network_scenario_${i}.json"
                 local net_bw="0"
                 local client_ip="N/A"
 
@@ -1698,7 +1698,7 @@ main() {
     TIMESTAMP=$(date '+%Y%m%d_%H%M%S')
     
     # 创建输出目录
-    mkdir -p "$OUTPUT_DIR/data"
+    mkdir -p "$OUTPUT_DIR"
     
     # 加载配置文件
     if [ -n "$CONFIG_FILE" ]; then
