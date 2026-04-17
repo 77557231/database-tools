@@ -262,4 +262,4 @@ This project is licensed under the GNU General Public License v3.0.
 
 **Version**: v2.0.0
 **Created**: 2026-04-17
-**Maintained by**: Vastbase Performance Diagnosis and Automation Operations Team
+**Maintained by**: Vastbase L2 Support Team
