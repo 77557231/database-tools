@@ -4,53 +4,101 @@
 #-- Version:     v2.0.0
 #-- Purpose:     Database System Benchmark Tool
 #-- Author:      Vastbase Performance Team
-#-- Description: 一键式系统压测工具，支持通过配置文件或命令行参数配置
+#-- Description: One-click system benchmarking tool, supports configuration via config file or command line parameters
 #--------------------------------------------------------------------------------
 
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# 默认参数
+# Default parameters
 CONFIG_FILE=""
 OUTPUT_DIR="./output"
 DRY_RUN=false
 
-# 立即 export 供库函数使用
+# Export immediately for library functions
 export OUTPUT_DIR
 
-# 解析命令行参数
+# Parse command line arguments
 parse_args() {
     local OPTIND=1
-    while getopts "c:o:dh" opt; do
-        case "$opt" in
-            c)
-                CONFIG_FILE="$OPTARG"
+    local remaining_args=()
+    
+    # First pass: extract options and their arguments
+    while [ $OPTIND -le $# ]; do
+        case "${!OPTIND}" in
+            --)
+                # End of options
+                local OPTIND=$((OPTIND + 1))
+                break
                 ;;
-            o)
-                OUTPUT_DIR="$OPTARG"
+            --*)
+                # Long options
+                local opt="${!OPTIND}"
+                local opt_name="${opt:2}"
+                case "$opt_name" in
+                    help)
+                        show_help
+                        exit 0
+                        ;;
+                    dry-run)
+                        DRY_RUN=true
+                        ;;
+                    *)
+                        echo "Unknown option: $opt"
+                        show_help
+                        exit 1
+                        ;;
+                esac
+                local OPTIND=$((OPTIND + 1))
                 ;;
-            d)
-                DRY_RUN=true
+            -[codh])
+                # Single letter options (no argument)
+                local opt_char="${!OPTIND:1:1}"
+                case "$opt_char" in
+                    d)
+                        DRY_RUN=true
+                        ;;
+                    h)
+                        show_help
+                        exit 0
+                        ;;
+                esac
+                local OPTIND=$((OPTIND + 1))
                 ;;
-            h)
-                show_help
-                exit 0
+            -[co])
+                # Options that require an argument
+                local opt_char="${!OPTIND:1:1}"
+                local OPTIND=$((OPTIND + 1))
+                local opt_arg="${!OPTIND}"
+                case "$opt_char" in
+                    c)
+                        CONFIG_FILE="$opt_arg"
+                        ;;
+                    o)
+                        OUTPUT_DIR="$opt_arg"
+                        ;;
+                esac
+                local OPTIND=$((OPTIND + 1))
                 ;;
-            *)
+            -[^-]*)
+                # Unknown option starting with single dash
+                echo "Unknown option: ${!OPTIND}"
                 show_help
                 exit 1
                 ;;
+            *)
+                remaining_args+=("${!OPTIND}")
+                local OPTIND=$((OPTIND + 1))
+                ;;
         esac
     done
-    shift $((OPTIND-1))
     
-    # 处理额外的参数（键值对形式）
-    for arg in "$@"; do
+    # Process remaining arguments as KEY=VALUE pairs
+    for arg in "${remaining_args[@]}"; do
         if [[ "$arg" =~ ^([A-Z_]+)=(.*)$ ]]; then
             local key="${BASH_REMATCH[1]}"
             local value="${BASH_REMATCH[2]}"
-            # 导出为环境变量，这样可以覆盖配置文件中的值
             export "$key"="$value"
         fi
     done
@@ -60,41 +108,83 @@ parse_args() {
 show_help() {
     echo "Usage: $0 [options] [KEY=VALUE ...]"
     echo ""
+    echo "Support three configuration modes: parameter mode and configuration file mode, or mixed mode."
+    echo "When both parameters and configuration file are configured, parameters will override configuration file."
+    echo ""
     echo "Options:"
     echo "  -c <config_file>  Specify configuration file path (default: config/parameter.conf)"
     echo "  -o <output_dir>   Specify output directory path (default: ./output)"
     echo "  -d                Dry run mode (show commands without execution)"
     echo "  -h                Show this help message"
     echo ""
-    echo "Additional parameters (KEY=VALUE format):"
-    echo "  DURATION=<seconds>          Set unified test duration (default: 10)"
-    echo "  CPU_ENABLED=true|false      Enable/Disable CPU test (default: true)"
-    echo "  CPU_MAX_PRIME=<number>      Set maximum prime number for CPU test (default: 20000)"
-    echo "  MEMORY_ENABLED=true|false   Enable/Disable Memory test (default: true)"
-    echo "  IO_ENABLED=true|false       Enable/Disable IO test (default: true)"
-    echo "  IO_TOOL=sysbench|fio        Set IO test tool (default: sysbench)"
-    echo "  NETWORK_ENABLED=true|false  Enable/Disable Network test (default: false)"
-    echo "  NETWORK_SERVER_IP=<ip>     Set network server IP address"
-    echo "  NETWORK_CLIENT_IP=<ips>     Set network client IP addresses (space-separated)"
-    echo "  THREADS_ENABLED=true|false  Enable/Disable Threads test (default: true)"
-    echo "  MUTEX_ENABLED=true|false    Enable/Disable Mutex test (default: true)"
-    echo "  PGBENCH_ENABLED=true|false  Enable/Disable pgbench test (default: false)"
-    echo "  PGBENCH_DB=<database>       Set pgbench database name (default: pgbench_db)"
+    echo "Test parameters (KEY=VALUE format):"
+    echo "  === Core ==="
+    echo "  DURATION=<seconds>          Unified test duration (default: 10)"
+    echo "  OUTPUT_DIR=<path>           Output directory (default: ./output)"
+    echo "  CLEANUP=true|false          Cleanup temp files after test (default: true)"
+    echo ""
+    echo "  === CPU Test ==="
+    echo "  CPU_ENABLED=true|false      Enable CPU test (default: true)"
+    echo "  CPU_THREADS=<number>        CPU test threads, 0=auto (default: 0)"
+    echo "  CPU_MAX_PRIME=<number>      Max prime number for CPU test (default: 20000)"
+    echo ""
+    echo "  === Memory Test ==="
+    echo "  MEMORY_ENABLED=true|false   Enable Memory test (default: true)"
+    echo "  MEMORY_THREADS=<number>     Memory test threads, 0=auto (default: 0)"
+    echo "  MEMORY_BLOCK_SIZE=<size>    Block size, e.g. 8K (default: 8K)"
+    echo "  MEMORY_TOTAL_SIZE=<size>    Total test size, e.g. 20G (default: 20G)"
+    echo "  MEMORY_OPER=read|write      Memory operation (default: read)"
+    echo ""
+    echo "  === IO Test ==="
+    echo "  IO_ENABLED=true|false       Enable IO test (default: true)"
+    echo "  IO_TOOL=sysbench|fio        IO test tool (default: sysbench)"
+    echo "  IO_TOTAL_SIZE=<size>        Total file size for IO test (default: 1G)"
+    echo "  IO_TEST_MODE=<mode>         Test mode: rndrw|read|write (default: rndrw)"
+    echo "  IO_FILE_NUM=<number>        Number of test files (default: 1)"
+    echo "  IO_TEST_PATH=<path>         Test directory path (default: /tmp)"
+    echo "  FIO_DURATION=<seconds>      fio test duration (default: same as DURATION)"
+    echo ""
+    echo "  === Network Test ==="
+    echo "  NETWORK_ENABLED=true|false  Enable Network test (default: false)"
+    echo "  NETWORK_SERVER_IP=<ip>     Network server IP address"
+    echo "  NETWORK_CLIENT_IP=<ips>     Network client IP addresses (space-separated)"
+    echo "  NETWORK_PORT=<port>        Test port (default: 25201)"
+    echo "  NETWORK_PARALLEL=<number>  Parallel connections (default: 1)"
+    echo ""
+    echo "  === Threads Test ==="
+    echo "  THREADS_ENABLED=true|false  Enable Threads test (default: true)"
+    echo "  THREADS_NUM=<number>        Number of threads (default: 1000)"
+    echo "  THREADS_YIELDS=<number>     Number of yields per thread (default: 100)"
+    echo "  THREADS_LOCKS=<number>      Number of locks (default: 4)"
+    echo ""
+    echo "  === Mutex Test ==="
+    echo "  MUTEX_ENABLED=true|false    Enable Mutex test (default: true)"
+    echo "  MUTEX_THREADS=<number>      Mutex test threads, 0=auto (default: 0)"
+    echo "  MUTEX_NUM=<number>          Number of mutexes (default: 1024)"
+    echo ""
+    echo "  === pgbench Test ==="
+    echo "  PGBENCH_ENABLED=true|false  Enable pgbench test (default: false)"
+    echo "  PGBENCH_DB=<database>       pgbench database name (default: pgbench_db)"
+    echo "  PGBENCH_THREADS=<number>    pgbench threads, 0=auto (default: 0)"
+    echo "  PGBENCH_DURATION=<seconds>  pgbench test duration (default: 300)"
     echo ""
     echo "Examples:"
-    echo "  $0 -c config/parameter.conf DURATION=30 CPU_MAX_PRIME=10000"
+    echo "  $0 -c parameter.conf DURATION=30 CPU_MAX_PRIME=10000"
     echo "  $0 DURATION=60 CPU_ENABLED=true MEMORY_ENABLED=false"
-    echo "  $0 NETWORK_ENABLED=true NETWORK_SERVER_IP=192.168.1.1"
+    echo "  $0 IO_TOOL=fio IO_TEST_PATH=/data FIO_DURATION=30"
+    echo "  $0 NETWORK_ENABLED=true NETWORK_SERVER_IP=\"192.168.1.1\"\"192.168.1.2\""
     echo ""
     echo "Project structure:"
-    echo "  vb_benchmark/               Main entry script (all functions integrated)"
-    echo "  config/parameter.conf       Unified parameter configuration"
-    echo "  tools/skill.md              Development documentation (Chinese)"
-    echo "  README.md                   Documentation (Chinese)"
-    echo "  README.en.md                Documentation (English)"
+    echo "  vb_benchmark/"
+    echo "  ├── parameter.conf       Unified parameter configuration"
+    echo "  ├── output/                   Test results output directory"
+    echo "  ├── tools/"
+    echo "  │   └── skill.md              Development documentation"
+    echo "  ├── README.md                 Documentation (Chinese)"
+    echo "  └── README.en.md              Documentation (English)"
 }
 
-# 检查命令是否存在
+# Check if command exists
 check_command() {
     local cmd="$1"
     local install_hint="$2"
@@ -111,12 +201,12 @@ check_command() {
     fi
 }
 
-# 获取 CPU 核心数
+# Get CPU core count
 get_cpu_cores() {
     nproc 2>/dev/null || grep -c ^processor /proc/cpuinfo 2>/dev/null || echo "unknown"
 }
 
-# 获取内存大小（MB）
+# Get memory size (MB)
 get_memory_size_mb() {
     if [ -f /proc/meminfo ]; then
         awk '/MemTotal/ {printf "%.0f", $2/1024}' /proc/meminfo 2>/dev/null
@@ -125,13 +215,13 @@ get_memory_size_mb() {
     fi
 }
 
-# 获取磁盘可用空间（KB）
+# Get disk available space (KB)
 get_disk_available_kb() {
     local path="${1:-/tmp}"
     df -P "$path" | awk 'NR==2 {print $4}'
 }
 
-# 日志输出函数
+# Log output functions
 log_info() {
     echo "[INFO] $(date '+%Y-%m-%d %H:%M:%S') - $1"
 }
@@ -144,7 +234,7 @@ log_warn() {
     echo "[WARN] $(date '+%Y-%m-%d %H:%M:%S') - $1"
 }
 
-# 清理测试文件
+# Cleanup test file
 cleanup_file() {
     local file="$1"
     if [ -f "$file" ]; then
@@ -152,11 +242,28 @@ cleanup_file() {
     fi
 }
 
-# 清理测试目录
+# Cleanup test directory
 cleanup_dir() {
     local dir="$1"
     if [ -d "$dir" ]; then
         rm -rf "$dir"
+    fi
+}
+
+# Execute command function (supports dry run mode)
+run_command() {
+    local cmd="$1"
+    local output_file="$2"
+    
+    if [ "$DRY_RUN" = true ]; then
+        echo "[DRY RUN] $cmd"
+        return 0
+    fi
+    
+    if [ -n "$output_file" ]; then
+        eval "$cmd" > "$output_file" 2>&1
+    else
+        eval "$cmd"
     fi
 }
 
@@ -471,32 +578,34 @@ run_sysbench_fileio() {
     echo "  File size: ${IO_TOTAL_SIZE:-1G}, Test mode: ${IO_TEST_MODE:-rndrw}"
     
     # Prepare test files first
-    sysbench fileio \
-        --file-total-size="${IO_TOTAL_SIZE:-1G}" \
-        --file-test-mode="${IO_TEST_MODE:-rndrw}" \
-        --file-num="${IO_FILE_NUM:-1}" \
-        prepare > /dev/null 2>&1
+    run_command "sysbench fileio \
+        --file-total-size=\"${IO_TOTAL_SIZE:-1G}\" \
+        --file-test-mode=\"${IO_TEST_MODE:-rndrw}\" \
+        --file-num=\"${IO_FILE_NUM:-1}\" \
+        prepare" "/dev/null"
     
     # Run test
-    sysbench fileio \
-        --file-total-size="${IO_TOTAL_SIZE:-1G}" \
-        --file-test-mode="${IO_TEST_MODE:-rndrw}" \
-        --time="${IO_DURATION:-120}" \
-        --file-num="${IO_FILE_NUM:-1}" \
-        run > "$temp_output_file" 2>&1
+    run_command "sysbench fileio \
+        --file-total-size=\"${IO_TOTAL_SIZE:-1G}\" \
+        --file-test-mode=\"${IO_TEST_MODE:-rndrw}\" \
+        --time=\"${IO_DURATION:-120}\" \
+        --file-num=\"${IO_FILE_NUM:-1}\" \
+        run" "$temp_output_file"
     
     # Cleanup test files
-    sysbench fileio \
-        --file-total-size="${IO_TOTAL_SIZE:-1G}" \
-        --file-test-mode="${IO_TEST_MODE:-rndrw}" \
-        --file-num="${IO_FILE_NUM:-1}" \
-        cleanup > /dev/null 2>&1
+    run_command "sysbench fileio \
+        --file-total-size=\"${IO_TOTAL_SIZE:-1G}\" \
+        --file-test-mode=\"${IO_TEST_MODE:-rndrw}\" \
+        --file-num=\"${IO_FILE_NUM:-1}\" \
+        cleanup" "/dev/null"
     
     # Parse result and display detailed output
-    parse_sysbench_fileio_result "$temp_output_file"
-    
-    # Append to combined results file
-    append_to_combined_result "SYSBENCH FILEIO TEST RESULTS" "$temp_output_file"
+    if [ "$DRY_RUN" != true ] && [ -f "$temp_output_file" ]; then
+        parse_sysbench_fileio_result "$temp_output_file"
+        
+        # Append to combined results file
+        append_to_combined_result "SYSBENCH FILEIO TEST RESULTS" "$temp_output_file"
+    fi
     
     # Cleanup temp file
     rm -f "$temp_output_file"
@@ -538,7 +647,7 @@ run_fio_test() {
 ioengine=libaio
 direct=1
 size=${IO_FILE_SIZE:-10G}
-runtime=${IO_DURATION:-300}
+runtime=${FIO_DURATION:-300}
 time_based
 group_reporting
 
@@ -550,15 +659,25 @@ numjobs=${numjobs}
 filename=${IO_TEST_PATH:-/tmp}/fio_test_${profile}
 EOF
         
+        # Show configuration file content (also shown in dry run mode)
+        echo "  Configuration file: $fio_conf"
+        echo "  Config content:"
+        echo "  ----------------"
+        cat "$fio_conf"
+        echo "  ----------------"
+        echo
+        
         # Run fio test
         local json_output="$OUTPUT_DIR/data/fio_${profile}_result.json"
-        fio "$fio_conf" --output="$json_output" --output-format=json 2>/dev/null
+        run_command "fio \"$fio_conf\" --output=\"$json_output\" --output-format=json" "/dev/null"
         
-        # Cleanup temporary files
+        # Cleanup temporary files (also cleanup in dry run mode)
         rm -f "$fio_conf"
         
         # Parse result
-        parse_fio_result "$json_output" "$profile"
+        if [ "$DRY_RUN" != true ] && [ -f "$json_output" ]; then
+            parse_fio_result "$json_output" "$profile"
+        fi
     done
     
     echo "✓ fio test completed"
@@ -748,7 +867,7 @@ run_single_network_test() {
     
     # Start iperf3 server in background
     echo "  Starting iperf3 server on port $port..."
-    iperf3 -s -p "$port" -D > /dev/null 2>&1
+    run_command "iperf3 -s -p \"$port\" -D" "/dev/null"
     iperf3_pid=$!
     sleep 2  # Wait for server to start
     
@@ -774,14 +893,14 @@ run_single_network_test() {
         local client_text_output="$output_dir/data/network_scenario_${client_idx}_text.txt"
         
         # Run iperf3 client with timeout and capture both JSON and text output
-        if timeout $client_timeout iperf3 -c "$server_ip" \
-            -p "$port" \
-            -t "$duration" \
-            -P "$parallel" \
-            -J > "$client_output_file" 2>&1; then
+        if run_command "timeout $client_timeout iperf3 -c \"$server_ip\" \
+            -p \"$port\" \
+            -t \"$duration\" \
+            -P \"$parallel\" \
+            -J" "$client_output_file"; then
             
             # Capture text format output for per-second data
-            iperf3 -c "$server_ip" -p "$port" -t "$duration" -P "$parallel" 2>&1 | grep -v "^$" > "$client_text_output"
+            run_command "iperf3 -c \"$server_ip\" -p \"$port\" -t \"$duration\" -P \"$parallel\" 2>&1 | grep -v \"^$\"" "$client_text_output"
             
             # Parse and display result
             parse_iperf3_result "$client_output_file"
@@ -1046,18 +1165,20 @@ run_threads_test() {
     echo "Starting threads test..."
     echo "  Threads: $threads, Duration: ${duration}s, yields: ${THREADS_YIELDS:-100}, locks: ${THREADS_LOCKS:-4}"
     
-    sysbench threads \
-        --threads="$threads" \
-        --thread-yields="${THREADS_YIELDS:-100}" \
-        --thread-locks="${THREADS_LOCKS:-4}" \
-        --time="${duration}" \
-        run > "$temp_output_file" 2>&1
+    run_command "sysbench threads \
+        --threads=\"$threads\" \
+        --thread-yields=\"${THREADS_YIELDS:-100}\" \
+        --thread-locks=\"${THREADS_LOCKS:-4}\" \
+        --time=\"${duration}\" \
+        run" "$temp_output_file"
     
     # Parse result and display detailed output
-    parse_threads_result "$temp_output_file"
-    
-    # Append to combined results file
-    append_to_combined_result "THREADS TEST RESULTS" "$temp_output_file"
+    if [ "$DRY_RUN" != true ] && [ -f "$temp_output_file" ]; then
+        parse_threads_result "$temp_output_file"
+        
+        # Append to combined results file
+        append_to_combined_result "THREADS TEST RESULTS" "$temp_output_file"
+    fi
     
     # Cleanup temp file
     rm -f "$temp_output_file"
@@ -1100,17 +1221,19 @@ run_mutex_test() {
     echo "Starting mutex test..."
     echo "  Threads: $threads, Duration: ${duration}s, mutex num: ${MUTEX_NUM:-1024}"
     
-    sysbench mutex \
-        --mutex-num="${MUTEX_NUM:-1024}" \
-        --threads="$threads" \
-        --time="${duration}" \
-        run > "$temp_output_file" 2>&1
+    run_command "sysbench mutex \
+        --mutex-num=\"${MUTEX_NUM:-1024}\" \
+        --threads=\"$threads\" \
+        --time=\"${duration}\" \
+        run" "$temp_output_file"
     
     # Parse result and display detailed output
-    parse_mutex_result "$temp_output_file"
-    
-    # Append to combined results file
-    append_to_combined_result "MUTEX TEST RESULTS" "$temp_output_file"
+    if [ "$DRY_RUN" != true ] && [ -f "$temp_output_file" ]; then
+        parse_mutex_result "$temp_output_file"
+        
+        # Append to combined results file
+        append_to_combined_result "MUTEX TEST RESULTS" "$temp_output_file"
+    fi
     
     # Cleanup temp file
     rm -f "$temp_output_file"
@@ -1153,17 +1276,19 @@ run_cpu_test() {
     echo "Starting CPU test..."
     echo "  Threads: $threads, Duration: ${duration}s, Max Prime: ${CPU_MAX_PRIME:-20000}"
     
-    sysbench cpu \
-        --cpu-max-prime="${CPU_MAX_PRIME:-20000}" \
-        --threads="$threads" \
-        --time="${duration}" \
-        run > "$temp_output_file" 2>&1
+    run_command "sysbench cpu \
+        --cpu-max-prime=\"${CPU_MAX_PRIME:-20000}\" \
+        --threads=\"$threads\" \
+        --time=\"${duration}\" \
+        run" "$temp_output_file"
     
     # Parse result and display detailed output
-    parse_cpu_result "$temp_output_file"
-    
-    # Append to combined results file
-    append_to_combined_result "CPU TEST RESULTS" "$temp_output_file"
+    if [ "$DRY_RUN" != true ] && [ -f "$temp_output_file" ]; then
+        parse_cpu_result "$temp_output_file"
+        
+        # Append to combined results file
+        append_to_combined_result "CPU TEST RESULTS" "$temp_output_file"
+    fi
     
     # Cleanup temp file
     rm -f "$temp_output_file"
@@ -1185,19 +1310,21 @@ run_memory_test() {
     echo "Starting memory test..."
     echo "  Threads: $threads, Duration: ${duration}s, Block size: ${MEMORY_BLOCK_SIZE:-8K}"
     
-    sysbench memory \
-        --memory-block-size="${MEMORY_BLOCK_SIZE:-8K}" \
-        --memory-total-size="${MEMORY_TOTAL_SIZE:-20G}" \
-        --memory-oper="${MEMORY_OPER:-read}" \
-        --threads="$threads" \
-        --time="${duration}" \
-        run > "$temp_output_file" 2>&1
+    run_command "sysbench memory \
+        --memory-block-size=\"${MEMORY_BLOCK_SIZE:-8K}\" \
+        --memory-total-size=\"${MEMORY_TOTAL_SIZE:-20G}\" \
+        --memory-oper=\"${MEMORY_OPER:-read}\" \
+        --threads=\"$threads\" \
+        --time=\"${duration}\" \
+        run" "$temp_output_file"
     
     # Parse result and display detailed output
-    parse_memory_result "$temp_output_file"
-    
-    # Append to combined results file
-    append_to_combined_result "MEMORY TEST RESULTS" "$temp_output_file"
+    if [ "$DRY_RUN" != true ] && [ -f "$temp_output_file" ]; then
+        parse_memory_result "$temp_output_file"
+        
+        # Append to combined results file
+        append_to_combined_result "MEMORY TEST RESULTS" "$temp_output_file"
+    fi
     
     # Cleanup temp file
     rm -f "$temp_output_file"
@@ -1224,23 +1351,25 @@ run_pgbench_test() {
     
     # Create database if it doesn't exist
     echo "  Creating database $db_name if it doesn't exist..."
-    psql -c "CREATE DATABASE $db_name" 2>/dev/null || true
+    run_command "psql -c \"CREATE DATABASE $db_name\" 2>/dev/null || true" "/dev/null"
     
     # Initialize pgbench schema
     echo "  Initializing pgbench schema..."
-    pgbench -i -s 1 $db_name
+    run_command "pgbench -i -s 1 $db_name" "/dev/null"
     
     # Run pgbench test
     echo "  Running pgbench benchmark..."
-    pgbench -c $threads -j $threads -T $duration -r $db_name > "$temp_output_file" 2>&1
+    run_command "pgbench -c $threads -j $threads -T $duration -r $db_name" "$temp_output_file"
     
     # Display result
-    echo ""
-    echo "pgbench test results:"
-    cat "$temp_output_file"
-    
-    # Append to combined results file
-    append_to_combined_result "PGBENCH TEST RESULTS" "$temp_output_file"
+    if [ "$DRY_RUN" != true ] && [ -f "$temp_output_file" ]; then
+        echo ""
+        echo "pgbench test results:"
+        cat "$temp_output_file"
+        
+        # Append to combined results file
+        append_to_combined_result "PGBENCH TEST RESULTS" "$temp_output_file"
+    fi
     
     # Cleanup temp file
     rm -f "$temp_output_file"
@@ -1585,8 +1714,11 @@ main() {
             if [ -f "$config_dir_config" ]; then
                 load_config "parameter" "$config_dir_config"
             else
-                # 如果没有 parameter.conf，使用 quick.conf
-                load_config "quick"
+                echo "错误：找不到配置文件 parameter.conf"
+                echo "请确保配置文件存在于以下位置之一："
+                echo "  - ${SCRIPT_DIR}/parameter.conf"
+                echo "  - ${SCRIPT_DIR}/config/parameter.conf"
+                exit 1
             fi
         fi
     fi

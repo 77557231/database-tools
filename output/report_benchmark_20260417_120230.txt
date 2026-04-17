@@ -1,0 +1,104 @@
+================================================================================
+                    Database System Benchmark Report
+================================================================================
+
+Basic Information
+-----------------
+Test Time: 2026-04-17 12:02:48
+Hostname: vastbase
+CPU Cores: 4
+Memory Size: 7937 MB
+Config File: N/A
+Unified Duration: 2s
+
+================================================================================
+                           Test Configuration
+================================================================================
+
+[CPU Test]
+  Enabled: true
+  Threads: auto (4)
+  Duration: 2s
+  Max Prime: 20000
+
+[Memory Test]
+  Enabled: true
+  Block Size: 8K
+  Total Size: 20G
+  Operation: read
+  Duration: 2s
+
+[IO Test]
+  Enabled: true
+  Tool: fio
+  File Size: 1G
+  Test Mode: rndrw
+  Duration: 5s
+
+[Network Test]
+  Enabled: false
+  Tool: iperf3
+  Server: auto
+  Port: 25201
+  Duration: 2s
+  Parallel: 1
+
+[Threads Test]
+  Enabled: true
+  Threads: 1000
+  Duration: 2s
+  Yields: 100
+  Locks: 4
+
+[Mutex Test]
+  Enabled: true
+  Threads: auto (4)
+  Duration: 2s
+  Mutex Num: 1024
+
+[pgbench Test]
+  Enabled: false
+  Database: pgbench_db
+  Duration: 300s
+  Threads: auto (4)
+
+================================================================================
+                           Test Results Summary
+================================================================================
+
+[CPU Test]
+  CPU speed:
+    events per second: 403.54
+  Avg Latency:   9.85 ms
+  P95 Latency:   25.28 ms
+  Threads fairness:
+        events (avg/stddev):           202.5000/5.02
+        execution time (avg/stddev):   1.9946/0.01
+
+[Memory Test]
+  Total operations: 2621440 (7751909.65 per second)
+  Transferred:      20480.00 MiB (60561.79 MiB/sec)
+  Avg Latency:      0.00 ms
+  P95 Latency:      0 ms
+
+[IO Test]
+  Test not executed
+
+[Threads Test]
+  Events/sec:     2256.63
+  Avg Latency:    419.85 ms
+  P95 Latency:    1129.24 ms
+
+[Mutex Test]
+  Transactions:   4
+  TPS:            11.55
+  Avg Latency:    318.41 ms
+  P95 Latency:    344.08 ms
+
+[Network Test]
+
+[pgbench Test]
+
+================================================================================
+                                End of Report
+================================================================================

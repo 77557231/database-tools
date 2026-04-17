@@ -1,0 +1,85 @@
+================================================================================
+                    Database System Benchmark Report
+================================================================================
+
+Basic Information
+-----------------
+Test Time: 2026-04-17 12:05:17
+Hostname: vastbase
+CPU Cores: 4
+Memory Size: 7937 MB
+Config File: N/A
+Unified Duration: 2s
+
+================================================================================
+                           Test Configuration
+================================================================================
+
+[CPU Test]
+  Enabled: true
+  Threads: auto (4)
+  Duration: 2s
+  Max Prime: 20000
+
+[Memory Test]
+  Enabled: true
+  Block Size: 8K
+  Total Size: 20G
+  Operation: read
+  Duration: 2s
+
+[IO Test]
+  Enabled: true
+  Tool: fio
+  File Size: 1G
+  Test Mode: rndrw
+  Duration: 5s
+
+[Network Test]
+  Enabled: false
+  Tool: iperf3
+  Server: auto
+  Port: 25201
+  Duration: 2s
+  Parallel: 1
+
+[Threads Test]
+  Enabled: true
+  Threads: 1000
+  Duration: 2s
+  Yields: 100
+  Locks: 4
+
+[Mutex Test]
+  Enabled: true
+  Threads: auto (4)
+  Duration: 2s
+  Mutex Num: 1024
+
+[pgbench Test]
+  Enabled: false
+  Database: pgbench_db
+  Duration: 300s
+  Threads: auto (4)
+
+================================================================================
+                           Test Results Summary
+================================================================================
+
+[CPU Test]
+
+[Memory Test]
+
+[IO Test]
+
+[Threads Test]
+
+[Mutex Test]
+
+[Network Test]
+
+[pgbench Test]
+
+================================================================================
+                                End of Report
+================================================================================

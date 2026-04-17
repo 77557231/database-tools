@@ -8,14 +8,14 @@ Vastbase 系统基准测试工具是一个为 Vastbase、openGauss 和 PostgreSQ
 
 ```
 vb_benchmark/
-├── vb_benchmark              # 主入口脚本（所有函数集成）
+├── vb_benchmark              # 主入口脚本
 ├── config/
 │   └── parameter.conf       # 统一参数配置文件
 ├── output/                   # 测试结果输出目录
 ├── tools/
-│   └── skill.md            # 开发规范文档
-├── README.md                # 中文文档
-└── README.en.md            # 英文文档
+│   └── skill.md             # 开发规范文档
+├── README.md                # 中文文档（默认）
+└── README.en.md             # 英文文档
 ```
 
 ## 3. 开发规范
@@ -62,6 +62,13 @@ vb_benchmark/
 - 结果文件存储在 `output` 目录
 - 报告格式统一，便于解析和对比
 
+### 3.6 语言规范
+- **中文文档**：README.md（默认）和 tools/skill.md 使用中文
+- **英文文档**：README.en.md 使用英文
+- **代码注释**：所有代码注释使用英文
+- **配置文件**：parameter.conf 注释使用英文
+- **命令行输出**：支持中英文输出
+
 ## 4. 使用方法
 
 ### 基本用法
@@ -71,7 +78,7 @@ vb_benchmark/
 
 ### 使用配置文件
 ```bash
-./vb_benchmark -c config/parameter.conf
+./vb_benchmark -c path/to/parameter.conf
 ```
 
 ### 命令行参数覆盖
@@ -79,6 +86,7 @@ vb_benchmark/
 ./vb_benchmark DURATION=60
 ./vb_benchmark CPU_MAX_PRIME=10000
 ./vb_benchmark MEMORY_ENABLED=false
+./vb_benchmark IO_TOOL=fio IO_TEST_PATH=/data FIO_DURATION=30
 ```
 
 ### 干运行模式
@@ -93,25 +101,74 @@ vb_benchmark/
 | 参数 | 说明 | 默认值 | 示例 |
 |------|------|--------|------|
 | DURATION | 统一测试时长（秒） | 10 | 60 |
+| OUTPUT_DIR | 输出目录路径 | ./output | /var/results |
+| CLEANUP | 测试后清理临时文件 | true | true/false |
+
+### CPU 测试参数
+
+| 参数 | 说明 | 默认值 | 示例 |
+|------|------|--------|------|
 | CPU_ENABLED | 是否启用 CPU 测试 | true | true/false |
 | CPU_THREADS | CPU 测试线程数（0=自动） | 0 | 8 |
 | CPU_MAX_PRIME | CPU 测试最大素数 | 20000 | 10000 |
+
+### 内存测试参数
+
+| 参数 | 说明 | 默认值 | 示例 |
+|------|------|--------|------|
 | MEMORY_ENABLED | 是否启用内存测试 | true | true/false |
+| MEMORY_THREADS | 内存测试线程数（0=自动） | 0 | 8 |
+| MEMORY_BLOCK_SIZE | 块大小 | 8K | 4K/8K/16K |
+| MEMORY_TOTAL_SIZE | 总测试大小 | 20G | 10G/20G |
+| MEMORY_OPER | 内存操作类型 | read | read/write |
+
+### IO 测试参数
+
+| 参数 | 说明 | 默认值 | 示例 |
+|------|------|--------|------|
 | IO_ENABLED | 是否启用 IO 测试 | true | true/false |
 | IO_TOOL | IO 测试工具 | sysbench | sysbench/fio |
-| NETWORK_ENABLED | 是否启用网络测试 | false | true/false |
-| THREADS_ENABLED | 是否启用线程测试 | true | true/false |
-| MUTEX_ENABLED | 是否启用互斥锁测试 | true | true/false |
-| PGBENCH_ENABLED | 是否启用 pgbench 测试 | false | true/false |
+| IO_TOTAL_SIZE | IO 测试文件总大小 | 1G | 1G/10G |
+| IO_TEST_MODE | 测试模式 | rndrw | rndrw/read/write |
+| IO_FILE_NUM | 测试文件数量 | 1 | 4 |
+| IO_TEST_PATH | 测试目录路径 | /tmp | /data |
+| FIO_DURATION | fio 测试时长（秒） | 同 DURATION | 30 |
 
 ### 网络测试参数
 
 | 参数 | 说明 | 默认值 | 示例 |
 |------|------|--------|------|
+| NETWORK_ENABLED | 是否启用网络测试 | false | true/false |
 | NETWORK_SERVER_IP | 服务器 IP（空值自动检测） | "" | "192.168.1.100" |
 | NETWORK_CLIENT_IP | 客户端 IP（支持多个 IP 空格分隔） | "" | "192.168.1.101 192.168.1.102" |
 | NETWORK_PORT | 测试端口 | 25201 | 5201 |
 | NETWORK_PARALLEL | 并行连接数 | 1 | 4 |
+
+### 线程测试参数
+
+| 参数 | 说明 | 默认值 | 示例 |
+|------|------|--------|------|
+| THREADS_ENABLED | 是否启用线程测试 | true | true/false |
+| THREADS_NUM | 线程数 | 1000 | 1000 |
+| THREADS_YIELDS | 每线程 yield 次数 | 100 | 100 |
+| THREADS_LOCKS | 锁数量 | 4 | 4 |
+
+### 互斥锁测试参数
+
+| 参数 | 说明 | 默认值 | 示例 |
+|------|------|--------|------|
+| MUTEX_ENABLED | 是否启用互斥锁测试 | true | true/false |
+| MUTEX_THREADS | 互斥锁测试线程数（0=自动） | 0 | 8 |
+| MUTEX_NUM | 互斥锁数量 | 1024 | 1024 |
+
+### pgbench 测试参数
+
+| 参数 | 说明 | 默认值 | 示例 |
+|------|------|--------|------|
+| PGBENCH_ENABLED | 是否启用 pgbench 测试 | false | true/false |
+| PGBENCH_DB | pgbench 数据库名 | pgbench_db | mydb |
+| PGBENCH_THREADS | pgbench 线程数（0=自动） | 0 | 8 |
+| PGBENCH_DURATION | pgbench 测试时长（秒） | 300 | 300 |
 
 ## 6. 输出指标
 
