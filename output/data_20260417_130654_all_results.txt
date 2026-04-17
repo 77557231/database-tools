@@ -16,22 +16,22 @@ Initializing worker threads...
 Threads started!
 
 CPU speed:
-    events per second:   979.35
+    events per second:   920.76
 
 General statistics:
-    total time:                          2.0012s
-    total number of events:              1962
+    total time:                          10.0029s
+    total number of events:              9212
 
 Latency (ms):
          min:                                    3.04
-         avg:                                    4.05
-         max:                                   41.04
-         95th percentile:                        8.43
-         sum:                                 7955.45
+         avg:                                    4.34
+         max:                                   45.76
+         95th percentile:                       11.87
+         sum:                                39993.59
 
 Threads fairness:
-    events (avg/stddev):           490.5000/12.46
-    execution time (avg/stddev):   1.9889/0.01
+    events (avg/stddev):           2303.0000/65.51
+    execution time (avg/stddev):   9.9984/0.00
 
 
 
@@ -55,25 +55,25 @@ Initializing worker threads...
 
 Threads started!
 
-Total operations: 2621440 (7885951.78 per second)
+Total operations: 2621440 (8664651.83 per second)
 
-20480.00 MiB transferred (61609.00 MiB/sec)
+20480.00 MiB transferred (67692.59 MiB/sec)
 
 
 General statistics:
-    total time:                          0.3299s
+    total time:                          0.3001s
     total number of events:              2621440
 
 Latency (ms):
          min:                                    0.00
          avg:                                    0.00
-         max:                                   11.81
+         max:                                   10.29
          95th percentile:                        0.00
-         sum:                                  735.33
+         sum:                                  703.84
 
 Threads fairness:
     events (avg/stddev):           655360.0000/0.00
-    execution time (avg/stddev):   0.1838/0.02
+    execution time (avg/stddev):   0.1760/0.01
 
 
 
@@ -103,28 +103,28 @@ Threads started!
 
 
 File operations:
-    reads/s:                      14938.20
-    writes/s:                     9958.80
-    fsyncs/s:                     249.47
+    reads/s:                      14056.69
+    writes/s:                     9371.19
+    fsyncs/s:                     234.31
 
 Throughput:
-    read, MiB/s:                  233.41
-    written, MiB/s:               155.61
+    read, MiB/s:                  219.64
+    written, MiB/s:               146.42
 
 General statistics:
-    total time:                          2.0018s
-    total number of events:              50399
+    total time:                          10.0016s
+    total number of events:              236712
 
 Latency (ms):
          min:                                    0.00
          avg:                                    0.04
-         max:                                   59.53
+         max:                                   65.07
          95th percentile:                        0.02
-         sum:                                 1978.87
+         sum:                                 9903.27
 
 Threads fairness:
-    events (avg/stddev):           50399.0000/0.00
-    execution time (avg/stddev):   1.9789/0.00
+    events (avg/stddev):           236712.0000/0.00
+    execution time (avg/stddev):   9.9033/0.00
 
 
 
@@ -144,19 +144,19 @@ Threads started!
 
 
 General statistics:
-    total time:                          2.2493s
-    total number of events:              5869
+    total time:                          10.2709s
+    total number of events:              26523
 
 Latency (ms):
          min:                                    0.14
-         avg:                                  364.44
-         max:                                 2179.82
-         95th percentile:                     1069.86
-         sum:                              2138872.54
+         avg:                                  382.64
+         max:                                 4293.37
+         95th percentile:                     1235.62
+         sum:                             10148811.44
 
 Threads fairness:
-    events (avg/stddev):           5.8690/2.85
-    execution time (avg/stddev):   2.1389/0.07
+    events (avg/stddev):           26.5230/6.77
+    execution time (avg/stddev):   10.1488/0.08
 
 
 
@@ -176,18 +176,18 @@ Threads started!
 
 
 General statistics:
-    total time:                          0.2396s
+    total time:                          0.5887s
     total number of events:              4
 
 Latency (ms):
-         min:                                  205.68
-         avg:                                  217.94
-         max:                                  239.48
-         95th percentile:                      240.02
-         sum:                                  871.77
+         min:                                  432.96
+         avg:                                  507.70
+         max:                                  588.57
+         95th percentile:                      590.56
+         sum:                                 2030.78
 
 Threads fairness:
     events (avg/stddev):           1.0000/0.00
-    execution time (avg/stddev):   0.2179/0.01
+    execution time (avg/stddev):   0.5077/0.07
 
 
