@@ -4,7 +4,7 @@
 
 Basic Information
 -----------------
-Test Time: 2026-04-17 11:10:20
+Test Time: 2026-04-17 13:07:30
 Hostname: vastbase
 CPU Cores: 4
 Memory Size: 7937 MB
@@ -30,10 +30,10 @@ Unified Duration: 10s
 
 [IO Test]
   Enabled: true
-  Tool: fio
+  Tool: sysbench
   File Size: 1G
   Test Mode: rndrw
-  Duration: 300s
+  Duration: 10s
 
 [Network Test]
   Enabled: false
@@ -68,32 +68,38 @@ Unified Duration: 10s
 
 [CPU Test]
   CPU speed:
-    events per second: 851.49
-  Avg Latency:   4.69 ms
-  P95 Latency:   12.52 ms
+    events per second: 920.76
+  Avg Latency:   4.34 ms
+  P95 Latency:   11.87 ms
   Threads fairness:
-        events (avg/stddev):           2134.2500/44.83
-        execution time (avg/stddev):   10.0060/0.01
+        events (avg/stddev):           2303.0000/65.51
+        execution time (avg/stddev):   9.9984/0.00
 
 [Memory Test]
-  Total operations: 2621440 (4007978.13 per second)
-  Transferred:      20480.00 MiB (31312.33 MiB/sec)
+  Total operations: 2621440 (8664651.83 per second)
+  Transferred:      20480.00 MiB (67692.59 MiB/sec)
   Avg Latency:      0.00 ms
   P95 Latency:      0 ms
 
 [IO Test]
-  Test not executed
+  Read IOPS:        14056.69
+  Write IOPS:       9371.19
+  Total IOPS:       23427.88
+  Read BW:          219.64 MB/s
+  Write BW:         146.42 MB/s
+  Total BW:         366.06 MB/s
+  Avg Latency:      507.70 ms
 
 [Threads Test]
-  Events/sec:     2520.16
-  Avg Latency:    391.16 ms
-  P95 Latency:    1129.24 ms
+  Events/sec:     2582.34
+  Avg Latency:    382.64 ms
+  P95 Latency:    1235.62 ms
 
 [Mutex Test]
   Transactions:   4
-  TPS:            12.35
-  Avg Latency:    281.11 ms
-  P95 Latency:    320.17 ms
+  TPS:            6.79
+  Avg Latency:    507.70 ms
+  P95 Latency:    590.56 ms
 
 [Network Test]
 
