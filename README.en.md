@@ -17,13 +17,12 @@ A system-level performance benchmarking tool designed for Vastbase, openGauss, a
 ```
 vb_benchmark/
 ├── vb_benchmark              # Main entry script
-├── config/
-│   └── parameter.conf       # Unified parameter configuration
+├── parameter.conf            # Unified parameter configuration
 ├── output/                   # Test results output directory
 ├── tools/
-│   └── skill.md             # Development documentation
+│   └── skill.md              # Development documentation
 ├── README.md                 # Documentation (Chinese)
-└── README.en.md             # Documentation (English)
+└── README.en.md              # Documentation (English)
 ```
 
 ## Quick Start
