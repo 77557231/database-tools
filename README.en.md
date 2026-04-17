@@ -16,14 +16,14 @@ A system-level performance benchmarking tool designed for Vastbase, openGauss, a
 
 ```
 vb_benchmark/
-├── vb_benchmark              # Main entry script (all functions integrated)
+├── vb_benchmark              # Main entry script
 ├── config/
 │   └── parameter.conf       # Unified parameter configuration
 ├── output/                   # Test results output directory
 ├── tools/
-│   └── skill.md            # Development documentation
-├── README.md                # Documentation (Chinese)
-└── README.en.md            # Documentation (English)
+│   └── skill.md             # Development documentation
+├── README.md                 # Documentation (Chinese)
+└── README.en.md             # Documentation (English)
 ```
 
 ## Quick Start
@@ -63,7 +63,9 @@ sudo apt-get install -y sysbench fio iperf3 jq
 
 #### Using Configuration File
 ```bash
-./vb_benchmark -c config/parameter.conf
+./vb_benchmark -c parameter.conf
+# Or use full path
+./vb_benchmark -c path/parameter.conf
 ```
 
 #### Command Line Parameter Override
@@ -79,6 +81,12 @@ sudo apt-get install -y sysbench fio iperf3 jq
 
 # Use fio for IO testing
 ./vb_benchmark IO_TOOL=fio
+
+# Set fio test duration and path
+./vb_benchmark IO_TOOL=fio IO_TEST_PATH=/data FIO_DURATION=30
+
+# Network testing
+./vb_benchmark NETWORK_ENABLED=true NETWORK_SERVER_IP=192.168.1.1
 ```
 
 #### Dry Run Mode
@@ -96,7 +104,7 @@ cat output/report_benchmark_*.txt
 
 ### Unified Configuration File
 
-The project uses a single configuration file `config/parameter.conf` to control all test parameters.
+The project uses a single configuration file `config/parameter.conf` to control all test parameters. The configuration file contains detailed English comments.
 
 ### Detailed Parameter Description
 
@@ -105,25 +113,74 @@ The project uses a single configuration file `config/parameter.conf` to control 
 | Parameter | Description | Default | Example |
 |-----------|-------------|---------|---------|
 | DURATION | Unified test duration (seconds) | 10 | 60 |
+| OUTPUT_DIR | Output directory path | ./output | /var/results |
+| CLEANUP | Cleanup temp files after test | true | true/false |
+
+#### CPU Test Parameters
+
+| Parameter | Description | Default | Example |
+|-----------|-------------|---------|---------|
 | CPU_ENABLED | Enable CPU test | true | true/false |
-| CPU_THREADS | CPU test threads (0=auto) | 0 | 8 |
-| CPU_MAX_PRIME | Maximum prime number for CPU test | 20000 | 10000 |
+| CPU_THREADS | CPU test threads, 0=auto | 0 | 8 |
+| CPU_MAX_PRIME | Max prime number for CPU test | 20000 | 10000 |
+
+#### Memory Test Parameters
+
+| Parameter | Description | Default | Example |
+|-----------|-------------|---------|---------|
 | MEMORY_ENABLED | Enable Memory test | true | true/false |
+| MEMORY_THREADS | Memory test threads, 0=auto | 0 | 8 |
+| MEMORY_BLOCK_SIZE | Block size | 8K | 4K/8K/16K |
+| MEMORY_TOTAL_SIZE | Total test size | 20G | 10G/20G |
+| MEMORY_OPER | Memory operation type | read | read/write |
+
+#### IO Test Parameters
+
+| Parameter | Description | Default | Example |
+|-----------|-------------|---------|---------|
 | IO_ENABLED | Enable IO test | true | true/false |
-| IO_TOOL | IO testing tool | sysbench | sysbench/fio |
-| NETWORK_ENABLED | Enable Network test | false | true/false |
-| THREADS_ENABLED | Enable Threads test | true | true/false |
-| MUTEX_ENABLED | Enable Mutex test | true | true/false |
-| PGBENCH_ENABLED | Enable pgbench test | false | true/false |
+| IO_TOOL | IO test tool | sysbench | sysbench/fio |
+| IO_TOTAL_SIZE | IO test file total size | 1G | 1G/10G |
+| IO_TEST_MODE | Test mode | rndrw | rndrw/read/write |
+| IO_FILE_NUM | Number of test files | 1 | 4 |
+| IO_TEST_PATH | Test directory path | /tmp | /data |
+| FIO_DURATION | fio test duration (seconds) | same as DURATION | 30 |
 
 #### Network Test Parameters
 
 | Parameter | Description | Default | Example |
 |-----------|-------------|---------|---------|
+| NETWORK_ENABLED | Enable Network test | false | true/false |
 | NETWORK_SERVER_IP | Server IP (auto-detect if empty) | "" | "192.168.1.100" |
 | NETWORK_CLIENT_IP | Client IPs (space-separated for multiple) | "" | "192.168.1.101 192.168.1.102" |
 | NETWORK_PORT | Test port | 25201 | 5201 |
 | NETWORK_PARALLEL | Parallel connections | 1 | 4 |
+
+#### Threads Test Parameters
+
+| Parameter | Description | Default | Example |
+|-----------|-------------|---------|---------|
+| THREADS_ENABLED | Enable Threads test | true | true/false |
+| THREADS_NUM | Number of threads | 1000 | 1000 |
+| THREADS_YIELDS | Yield count per thread | 100 | 100 |
+| THREADS_LOCKS | Number of locks | 4 | 4 |
+
+#### Mutex Test Parameters
+
+| Parameter | Description | Default | Example |
+|-----------|-------------|---------|---------|
+| MUTEX_ENABLED | Enable Mutex test | true | true/false |
+| MUTEX_THREADS | Mutex test threads, 0=auto | 0 | 8 |
+| MUTEX_NUM | Number of mutexes | 1024 | 1024 |
+
+#### pgbench Test Parameters
+
+| Parameter | Description | Default | Example |
+|-----------|-------------|---------|---------|
+| PGBENCH_ENABLED | Enable pgbench test | false | true/false |
+| PGBENCH_DB | pgbench database name | pgbench_db | mydb |
+| PGBENCH_THREADS | pgbench threads, 0=auto | 0 | 8 |
+| PGBENCH_DURATION | pgbench test duration (seconds) | 300 | 300 |
 
 ## Output Metrics
 
@@ -176,10 +233,10 @@ The project uses a single configuration file `config/parameter.conf` to control 
 **A**: Test files are only written to the specified directory (default `/tmp`) and can be automatically cleaned up after testing
 
 ### Q3: How to customize IO test path?
-**A**: Edit the configuration file and set `IO_TEST_PATH`
+**A**: Use `IO_TEST_PATH` parameter: `./vb_benchmark IO_TEST_PATH=/data`
 
 ### Q4: How to configure multi-client for network testing?
-**A**: Set `NETWORK_CLIENT_IP` in the configuration file
+**A**: Use `NETWORK_CLIENT_IP` parameter: `NETWORK_CLIENT_IP="192.168.1.101 192.168.1.102"`
 
 ## Best Practices
 

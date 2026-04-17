@@ -16,14 +16,14 @@
 
 ```
 vb_benchmark/
-├── vb_benchmark              # 主入口脚本（所有函数集成）
+├── vb_benchmark              # 主入口脚本
 ├── config/
 │   └── parameter.conf       # 统一参数配置文件
 ├── output/                   # 测试结果输出目录
 ├── tools/
-│   └── skill.md            # 开发规范文档
-├── README.md                # 中文文档
-└── README.en.md            # 英文文档
+│   └── skill.md             # 开发规范文档
+├── README.md                # 中文文档（默认）
+└── README.en.md             # 英文文档
 ```
 
 ## 快速开始
@@ -63,7 +63,9 @@ sudo apt-get install -y sysbench fio iperf3 jq
 
 #### 使用配置文件
 ```bash
-./vb_benchmark -c config/parameter.conf
+./vb_benchmark -c parameter.conf
+# 或使用完整路径
+./vb_benchmark -c path/parameter.conf
 ```
 
 #### 命令行参数覆盖
@@ -79,6 +81,12 @@ sudo apt-get install -y sysbench fio iperf3 jq
 
 # 使用 fio 进行 IO 测试
 ./vb_benchmark IO_TOOL=fio
+
+# 设置 fio 测试时长和目录
+./vb_benchmark IO_TOOL=fio IO_TEST_PATH=/data FIO_DURATION=30
+
+# 网络测试
+./vb_benchmark NETWORK_ENABLED=true NETWORK_SERVER_IP=192.168.1.1
 ```
 
 #### 干运行模式
@@ -105,25 +113,74 @@ cat output/report_benchmark_*.txt
 | 参数 | 说明 | 默认值 | 示例 |
 |------|------|--------|------|
 | DURATION | 统一测试时长（秒） | 10 | 60 |
+| OUTPUT_DIR | 输出目录路径 | ./output | /var/results |
+| CLEANUP | 测试后清理临时文件 | true | true/false |
+
+#### CPU 测试参数
+
+| 参数 | 说明 | 默认值 | 示例 |
+|------|------|--------|------|
 | CPU_ENABLED | 是否启用 CPU 测试 | true | true/false |
 | CPU_THREADS | CPU 测试线程数（0=自动） | 0 | 8 |
 | CPU_MAX_PRIME | CPU 测试最大素数 | 20000 | 10000 |
+
+#### 内存测试参数
+
+| 参数 | 说明 | 默认值 | 示例 |
+|------|------|--------|------|
 | MEMORY_ENABLED | 是否启用内存测试 | true | true/false |
+| MEMORY_THREADS | 内存测试线程数（0=自动） | 0 | 8 |
+| MEMORY_BLOCK_SIZE | 块大小 | 8K | 4K/8K/16K |
+| MEMORY_TOTAL_SIZE | 总测试大小 | 20G | 10G/20G |
+| MEMORY_OPER | 内存操作类型 | read | read/write |
+
+#### IO 测试参数
+
+| 参数 | 说明 | 默认值 | 示例 |
+|------|------|--------|------|
 | IO_ENABLED | 是否启用 IO 测试 | true | true/false |
 | IO_TOOL | IO 测试工具 | sysbench | sysbench/fio |
-| NETWORK_ENABLED | 是否启用网络测试 | false | true/false |
-| THREADS_ENABLED | 是否启用线程测试 | true | true/false |
-| MUTEX_ENABLED | 是否启用互斥锁测试 | true | true/false |
-| PGBENCH_ENABLED | 是否启用 pgbench 测试 | false | true/false |
+| IO_TOTAL_SIZE | IO 测试文件总大小 | 1G | 1G/10G |
+| IO_TEST_MODE | 测试模式 | rndrw | rndrw/read/write |
+| IO_FILE_NUM | 测试文件数量 | 1 | 4 |
+| IO_TEST_PATH | 测试目录路径 | /tmp | /data |
+| FIO_DURATION | fio 测试时长（秒） | 同 DURATION | 30 |
 
 #### 网络测试参数
 
 | 参数 | 说明 | 默认值 | 示例 |
 |------|------|--------|------|
+| NETWORK_ENABLED | 是否启用网络测试 | false | true/false |
 | NETWORK_SERVER_IP | 服务器 IP（空值自动检测） | "" | "192.168.1.100" |
 | NETWORK_CLIENT_IP | 客户端 IP（支持多个 IP 空格分隔） | "" | "192.168.1.101 192.168.1.102" |
 | NETWORK_PORT | 测试端口 | 25201 | 5201 |
 | NETWORK_PARALLEL | 并行连接数 | 1 | 4 |
+
+#### 线程测试参数
+
+| 参数 | 说明 | 默认值 | 示例 |
+|------|------|--------|------|
+| THREADS_ENABLED | 是否启用线程测试 | true | true/false |
+| THREADS_NUM | 线程数 | 1000 | 1000 |
+| THREADS_YIELDS | 每线程 yield 次数 | 100 | 100 |
+| THREADS_LOCKS | 锁数量 | 4 | 4 |
+
+#### 互斥锁测试参数
+
+| 参数 | 说明 | 默认值 | 示例 |
+|------|------|--------|------|
+| MUTEX_ENABLED | 是否启用互斥锁测试 | true | true/false |
+| MUTEX_THREADS | 互斥锁测试线程数（0=自动） | 0 | 8 |
+| MUTEX_NUM | 互斥锁数量 | 1024 | 1024 |
+
+#### pgbench 测试参数
+
+| 参数 | 说明 | 默认值 | 示例 |
+|------|------|--------|------|
+| PGBENCH_ENABLED | 是否启用 pgbench 测试 | false | true/false |
+| PGBENCH_DB | pgbench 数据库名 | pgbench_db | mydb |
+| PGBENCH_THREADS | pgbench 线程数（0=自动） | 0 | 8 |
+| PGBENCH_DURATION | pgbench 测试时长（秒） | 300 | 300 |
 
 ## 输出指标说明
 
@@ -176,10 +233,10 @@ cat output/report_benchmark_*.txt
 **A**: 测试文件仅写入指定目录（默认 `/tmp`），测试完成后可自动清理
 
 ### Q3: 如何自定义 IO 测试路径？
-**A**: 编辑配置文件，设置 `IO_TEST_PATH`
+**A**: 使用 `IO_TEST_PATH` 参数：`./vb_benchmark IO_TEST_PATH=/data`
 
 ### Q4: 网络测试如何配置多客户端？
-**A**: 在配置文件中设置 `NETWORK_CLIENT_IP`
+**A**: 使用 `NETWORK_CLIENT_IP` 参数：`NETWORK_CLIENT_IP="192.168.1.101 192.168.1.102"`
 
 ## 最佳实践
 
