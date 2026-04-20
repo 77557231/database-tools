@@ -1,0 +1,10 @@
+Connecting to host 172.16.53.128, port 25201
+[  5] local 172.16.53.128 port 49520 connected to 172.16.53.128 port 25201
+[ ID] Interval           Transfer     Bitrate         Retr  Cwnd
+[  5]   0.00-1.00   sec  1.91 GBytes  16.4 Gbits/sec    0   2.25 MBytes       
+[  5]   1.00-2.00   sec  1.94 GBytes  16.7 Gbits/sec    0   2.25 MBytes       
+- - - - - - - - - - - - - - - - - - - - - - - - -
+[ ID] Interval           Transfer     Bitrate         Retr
+[  5]   0.00-2.00   sec  3.85 GBytes  16.6 Gbits/sec    0             sender
+[  5]   0.00-2.05   sec  3.85 GBytes  16.2 Gbits/sec                  receiver
+iperf Done.

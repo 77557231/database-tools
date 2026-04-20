@@ -1,0 +1,147 @@
+================================================================================
+                    Database System Benchmark Report
+================================================================================
+
+Basic Information
+-----------------
+Test Time: 2026-04-17 17:41:11
+Hostname: vastbase
+CPU Cores: 4
+Memory Size: 7937 MB
+Config File: N/A
+Unified Duration: 2s
+
+================================================================================
+                           Test Configuration
+================================================================================
+
+[CPU Test]
+  Enabled: true
+  Threads: auto (4)
+  Duration: 2s
+  Max Prime: 20000
+
+[Memory Test]
+  Enabled: true
+  Block Size: 8K
+  Total Size: 20G
+  Operation: read
+  Duration: 2s
+
+[IO Test]
+  Enabled: true
+  Tool: sysbench
+  File Size: 1G
+  Test Mode: rndrw
+  Duration: 2s
+
+[Network Test]
+  Enabled: true
+  Tool: iperf3
+  Server: 172.16.53.128
+  Port: 25201
+  Duration: 2s
+  Parallel: 1
+
+[Threads Test]
+  Enabled: true
+  Threads: 1000
+  Duration: 2s
+  Yields: 100
+  Locks: 4
+
+[Mutex Test]
+  Enabled: true
+  Threads: auto (4)
+  Duration: 2s
+  Mutex Num: 1024
+
+[pgbench Test]
+  Enabled: false
+  Database: pgbench_db
+  Duration: 300s
+  Threads: auto (4)
+
+================================================================================
+                           Test Results Summary
+================================================================================
+
+[CPU Test]
+  CPU speed:
+    events per second: 408.79
+1129.10
+1204.90
+  Avg Latency:   9.73
+3.53
+3.31 ms
+  P95 Latency:   25.28
+6.21
+3.89 ms
+  Threads fairness:
+        events (avg/stddev):           205.7500/22.11
+        execution time (avg/stddev):   2.0026/0.00
+
+[Memory Test]
+  Total operations: 2621440
+2621440
+2621440 (7090344.00
+8302575.18
+9605649.62 per second)
+  Transferred:      20480.00
+20480.00
+20480.00 MiB (55393.31
+64863.87
+75044.14 MiB/sec)
+  Avg Latency:      0.00
+0.00
+0.00 ms
+  P95 Latency:      0 ms
+
+[IO Test]
+  Read IOPS:        18399.24
+11126.35
+16046.50
+  Write IOPS:       12266.16
+7417.57
+10697.67
+  Total IOPS:       18399.24
+  Read BW:          287.49
+173.85
+250.73 MB/s
+  Write BW:         191.66
+115.90
+167.15 MB/s
+  Total BW:         287.49 MB/s
+  Avg Latency:      396.15 ms
+
+[Threads Test]
+  Events/sec:     5520.00
+  Avg Latency:    390.08
+390.79
+446.47 ms
+  P95 Latency:    1069.86
+1109.09
+1427.08 ms
+
+[Mutex Test]
+  Transactions:   4
+4
+4
+  TPS:            4.00
+  Avg Latency:    493.94
+232.09
+396.15 ms
+  P95 Latency:    569.67
+253.35
+475.79 ms
+
+[Network Test]
+  172.16.54.140: 210.58 MB/s
+  172.16.54.141: 1411.99 MB/s
+  172.16.54.142: 330.41 MB/s
+
+[pgbench Test]
+
+================================================================================
+                                End of Report
+================================================================================

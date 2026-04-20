@@ -90,8 +90,41 @@ sudo apt-get install -y sysbench fio iperf3 jq
 ./vb_benchmark IO_TOOL=fio IO_TEST_PATH=/data FIO_DURATION=30
 
 # 网络测试
-./vb_benchmark NETWORK_ENABLED=true NETWORK_SERVER_IP=192.168.1.1
+./vb_benchmark -f "192.168.1.101 192.168.1.102"
 ```
+
+#### 安装 sysbench
+
+单机安装：
+```bash
+./vb_benchmark -i
+```
+
+多机器安装（从服务器列表文件）：
+```bash
+./vb_benchmark -i -f servers.txt
+```
+
+多机器安装（直接指定 IP 列表）：
+```bash
+./vb_benchmark -i -f "192.168.1.101 192.168.1.102 192.168.1.103"
+```
+
+**安装逻辑**：
+
+| 场景 | 行为 |
+|------|------|
+| 本机在 IP 列表中且无 `$HOME/sysbench` | 先编译，再分发 |
+| 本机有 `$HOME/sysbench` 目录 | 跳过编译，直接打包分发 |
+| 本机不在 IP 列表中 | 所有服务器都需要分发（从本地已有目录） |
+| SCP 分发 | 自动排除本机器 IP |
+
+**注意事项**：
+- `$HOME/sysbench` 目录会自动创建，若已存在则跳过编译过程
+- 多机器安装时，若本机在 IP 列表中且没有 `$HOME/sysbench` 目录，会先编译再分发
+- SCP 分发时会自动排除本机器 IP
+- 目标服务器需要配置 SSH 免密登录
+- 安装完成后会自动配置环境变量并生效
 
 #### 干运行模式
 
@@ -253,7 +286,6 @@ cat output/report_benchmark_*.txt
 
 ### Q4: 网络测试如何配置多客户端？
 
-**A**: 使用 `NETWORK_CLIENT_IP` 参数：`NETWORK_CLIENT_IP="192.168.1.101 192.168.1.102"`
 
 ## 最佳实践
 
@@ -273,6 +305,7 @@ cat output/report_benchmark_*.txt
 
 | 标签    | 日期         | 变更                                                 |
 | ----- | ---------- | -------------------------------------------------- |
+| 0.3.0 | 2026-04-20 | 支持通过 -f 服务器IP列表控制本地机器是否参与压测，若本机器不在IP列表中则不参与压测；支持编译和scp到目标集群服务器列表 |
 | 0.2.0 | 2026-04-17 | 重构移除 lib 目录，将所有函数合并到主脚本，添加命令行参数支持及覆盖功能，更新文档为中英文双版本 |
 | 0.1.0 | 2026-04-16 | 初始版本，包含基本基准测试功能                                    |
 

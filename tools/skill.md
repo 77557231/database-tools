@@ -9,22 +9,24 @@ Vastbase 系统基准测试工具是一个为 Vastbase、openGauss 和 PostgreSQ
 ```
 vb_benchmark/
 ├── vb_benchmark              # 主入口脚本
-├── config/
-│   └── parameter.conf       # 统一参数配置文件
+├── parameter.conf            # 统一参数配置文件
 ├── output/                   # 测试结果输出目录
 ├── tools/
-│   └── skill.md             # 开发规范文档
-├── README.md                # 中文文档（默认）
-└── README.en.md             # 英文文档
+│   └── skill.md              # 开发规范文档
+├── README.md                 # 中文文档（默认）
+└── README.en.md              # 英文文档
 ```
 
 ## 3. 开发规范
 
 ### 3.1 代码结构规范
 - 所有功能集成在单一的 `vb_benchmark` 脚本中
-- 避免使用 lib 目录，保持代码简洁
+- 避免使用 lib 等目录，保持代码简洁
 - 使用函数模块化设计，提高代码可维护性
 - 函数命名使用下划线分隔的小写字母（如 `run_cpu_test`）
+- 代码注释使用英文，清晰描述函数功能和逻辑
+- README.md和skill.md使用中文，其它使用都使用英文
+- 代码新功能和修复同时更新README.en.md和README.md到新版本历史描述中
 
 ### 3.2 命令行参数规范
 - 支持短选项（如 `-c`、`-o`、`-d`、`-h`）
@@ -33,7 +35,7 @@ vb_benchmark/
 - 参数名使用大写字母和下划线（如 `DURATION`、`CPU_MAX_PRIME`）
 
 ### 3.3 配置文件规范
-- 使用统一的 `config/parameter.conf` 配置文件
+- 使用统一的 `parameter.conf` 配置文件
 - 包含详细的英文注释
 - 支持通过命令行参数覆盖配置
 - 参数值使用小写或特定格式（如 `true/false`、`sysbench/fio`）
@@ -52,7 +54,7 @@ vb_benchmark/
    - 文档结构保持统一
 
 3. **更新版本历史**
-   - 在版本历史表中添加新条目
+   - 在README.md和README.en.md版本历史表中添加新条目
    - 包含更新日期和变更说明
    - 版本号按语义化版本规则递增
 
@@ -69,135 +71,60 @@ vb_benchmark/
 - **配置文件**：parameter.conf 注释使用英文
 - **命令行输出**：支持中英文输出
 
-## 4. 使用方法
+### 3.7 开发流程规范
+1. **需求分析**：明确功能需求和测试场景
+2. **代码实现**：遵循代码结构规范，实现功能
+3. **测试验证**：确保功能正常，结果准确
+4. **文档更新**：同步更新中英文 README
+5. **版本管理**：更新版本历史，打标签
 
-### 基本用法
-```bash
-./vb_benchmark
-```
+### 3.8 重复性工作规范
+- **参数管理**：统一使用配置文件和命令行参数，避免硬编码
+- **结果处理**：标准化结果格式，便于后续分析
+- **错误处理**：统一错误处理机制，提高脚本稳定性
+- **日志输出**：标准化日志格式，便于调试和问题定位
+- **测试场景**：模块化测试场景，便于扩展和复用
 
-### 使用配置文件
-```bash
-./vb_benchmark -c path/to/parameter.conf
-```
+## 4. 最佳实践
 
-### 命令行参数覆盖
-```bash
-./vb_benchmark DURATION=60
-./vb_benchmark CPU_MAX_PRIME=10000
-./vb_benchmark MEMORY_ENABLED=false
-./vb_benchmark IO_TOOL=fio IO_TEST_PATH=/data FIO_DURATION=30
-```
+### 4.1 代码质量
+- 保持代码简洁，避免冗余
+- 使用函数封装重复逻辑
+- 注释清晰，便于维护
+- 遵循命名规范，提高可读性
 
-### 干运行模式
-```bash
-./vb_benchmark -d
-```
+### 4.2 性能测试
+- 测试时长合理，确保结果稳定
+- 测试环境一致，避免外部干扰
+- 多次测试取平均值，提高准确性
+- 结果分析全面，关注关键指标
 
-## 5. 配置参数说明
+### 4.3 维护与更新
+- 定期更新依赖工具版本
+- 及时修复发现的问题
+- 持续优化测试逻辑
+- 保持文档与代码同步
 
-### 核心参数
+### 4.4 协作开发
+- 遵循统一的代码风格
+- 提交代码前进行测试
+- 提交信息清晰，描述变更内容
+- 定期同步代码，避免冲突
 
-| 参数 | 说明 | 默认值 | 示例 |
-|------|------|--------|------|
-| DURATION | 统一测试时长（秒） | 10 | 60 |
-| OUTPUT_DIR | 输出目录路径 | ./output | /var/results |
-| CLEANUP | 测试后清理临时文件 | true | true/false |
+## 5. 版本历史
+- 版本历史记录到README.md和README.en.md中，版本号和tag号一致，表格形式 tag/时间/内容
 
-### CPU 测试参数
-
-| 参数 | 说明 | 默认值 | 示例 |
-|------|------|--------|------|
-| CPU_ENABLED | 是否启用 CPU 测试 | true | true/false |
-| CPU_THREADS | CPU 测试线程数（0=自动） | 0 | 8 |
-| CPU_MAX_PRIME | CPU 测试最大素数 | 20000 | 10000 |
-
-### 内存测试参数
-
-| 参数 | 说明 | 默认值 | 示例 |
-|------|------|--------|------|
-| MEMORY_ENABLED | 是否启用内存测试 | true | true/false |
-| MEMORY_THREADS | 内存测试线程数（0=自动） | 0 | 8 |
-| MEMORY_BLOCK_SIZE | 块大小 | 8K | 4K/8K/16K |
-| MEMORY_TOTAL_SIZE | 总测试大小 | 20G | 10G/20G |
-| MEMORY_OPER | 内存操作类型 | read | read/write |
-
-### IO 测试参数
-
-| 参数 | 说明 | 默认值 | 示例 |
-|------|------|--------|------|
-| IO_ENABLED | 是否启用 IO 测试 | true | true/false |
-| IO_TOOL | IO 测试工具 | sysbench | sysbench/fio |
-| IO_TOTAL_SIZE | IO 测试文件总大小 | 1G | 1G/10G |
-| IO_TEST_MODE | 测试模式 | rndrw | rndrw/read/write |
-| IO_FILE_NUM | 测试文件数量 | 1 | 4 |
-| IO_TEST_PATH | 测试目录路径 | /tmp | /data |
-| FIO_DURATION | fio 测试时长（秒） | 同 DURATION | 30 |
-
-### 网络测试参数
-
-| 参数 | 说明 | 默认值 | 示例 |
-|------|------|--------|------|
-| NETWORK_ENABLED | 是否启用网络测试 | false | true/false |
-| NETWORK_SERVER_IP | 服务器 IP（空值自动检测） | "" | "192.168.1.100" |
-| NETWORK_CLIENT_IP | 客户端 IP（支持多个 IP 空格分隔） | "" | "192.168.1.101 192.168.1.102" |
-| NETWORK_PORT | 测试端口 | 25201 | 5201 |
-| NETWORK_PARALLEL | 并行连接数 | 1 | 4 |
-
-### 线程测试参数
-
-| 参数 | 说明 | 默认值 | 示例 |
-|------|------|--------|------|
-| THREADS_ENABLED | 是否启用线程测试 | true | true/false |
-| THREADS_NUM | 线程数 | 1000 | 1000 |
-| THREADS_YIELDS | 每线程 yield 次数 | 100 | 100 |
-| THREADS_LOCKS | 锁数量 | 4 | 4 |
-
-### 互斥锁测试参数
-
-| 参数 | 说明 | 默认值 | 示例 |
-|------|------|--------|------|
-| MUTEX_ENABLED | 是否启用互斥锁测试 | true | true/false |
-| MUTEX_THREADS | 互斥锁测试线程数（0=自动） | 0 | 8 |
-| MUTEX_NUM | 互斥锁数量 | 1024 | 1024 |
-
-### pgbench 测试参数
-
-| 参数 | 说明 | 默认值 | 示例 |
-|------|------|--------|------|
-| PGBENCH_ENABLED | 是否启用 pgbench 测试 | false | true/false |
-| PGBENCH_DB | pgbench 数据库名 | pgbench_db | mydb |
-| PGBENCH_THREADS | pgbench 线程数（0=自动） | 0 | 8 |
-| PGBENCH_DURATION | pgbench 测试时长（秒） | 300 | 300 |
-
-## 6. 输出指标
-
-| 测试类型 | 指标 | 说明 |
-|----------|------|------|
-| CPU | events/sec, avg latency, P95/P99 latency | 越高/低越好 |
-| 内存 | operations/sec, throughput, avg latency | 越高/低越好 |
-| IO | IOPS, Bandwidth, Latency | 越高/低越好 |
-| 网络 | Bandwidth | 越高越好 |
-| 线程 | events/sec, latency | 越高/低越好 |
-| 互斥锁 | transactions, TPS, latency | 越高/低越好 |
-| pgbench | TPS, latency average | 越高/低越好 |
-
-## 7. 版本历史
-
-| 标签 | 日期 | 变更 |
-|------|------|------|
-| 0.2.0 | 2026-04-17 | 重构移除 lib 目录，将所有函数合并到主脚本，添加命令行参数支持及覆盖功能，更新文档为中英文双版本 |
-| 0.1.0 | 2026-04-16 | 初始版本，包含基本基准测试功能 |
-
-## 8. 注意事项
+## 6. 注意事项
 
 1. **代码提交前**：确保中英文 README 已同步更新
 2. **版本发布前**：确保版本历史已正确记录
 3. **功能变更**：确保帮助信息与文档一致
 4. **参数变更**：确保 parameter.conf 注释与代码同步
+5. **测试环境**：确保测试环境稳定，避免外部干扰
+6. **结果分析**：综合分析测试结果，避免单一指标误导
 
 ---
 
-**版本**: v2.0.0
+**版本**: v0.2.0
 **创建日期**: 2026-04-17
-**维护团队**: Vastbase 性能诊断与自动化运维团队
+**维护团队**: Vastbase 二线团队
