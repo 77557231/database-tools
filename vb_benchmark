@@ -52,7 +52,7 @@ parse_args() {
                 esac
                 local OPTIND=$((OPTIND + 1))
                 ;;
-            -[codh])
+            -[codhi])
                 # Single letter options (no argument)
                 local opt_char="${!OPTIND:1:1}"
                 case "$opt_char" in
@@ -63,10 +63,13 @@ parse_args() {
                         show_help
                         exit 0
                         ;;
+                    i)
+                        SYSBENCH_INSTALL=true
+                        ;;
                 esac
                 local OPTIND=$((OPTIND + 1))
                 ;;
-            -[co])
+            -[cof])
                 # Options that require an argument
                 local opt_char="${!OPTIND:1:1}"
                 local OPTIND=$((OPTIND + 1))
@@ -77,6 +80,9 @@ parse_args() {
                         ;;
                     o)
                         OUTPUT_DIR="$opt_arg"
+                        ;;
+                    f)
+                        SERVERS_FILE="$opt_arg"
                         ;;
                 esac
                 local OPTIND=$((OPTIND + 1))
@@ -114,6 +120,8 @@ show_help() {
     echo "Options:"
     echo "  -c <config_file>  Specify configuration file path (default: config/parameter.conf)"
     echo "  -o <output_dir>   Specify output directory path (default: ./output)"
+    echo "  -f <servers_file> Specify servers list file path (one IP per line)"
+    echo "  -i                Install and distribute sysbench to target servers"
     echo "  -d                Dry run mode (show commands without execution)"
     echo "  -h                Show this help message"
     echo ""
@@ -145,9 +153,8 @@ show_help() {
     echo "  FIO_DURATION=<seconds>      fio test duration (default: same as DURATION)"
     echo ""
     echo "  === Network Test ==="
-    echo "  NETWORK_ENABLED=true|false  Enable Network test (default: false)"
-    echo "  NETWORK_SERVER_IP=<ip>     Network server IP address"
-    echo "  NETWORK_CLIENT_IP=<ips>     Network client IP addresses (space-separated)"
+    echo "  NETWORK_ENABLED=true|false  Enable Network test (default: true)"
+
     echo "  NETWORK_PORT=<port>        Test port (default: 25201)"
     echo "  NETWORK_PARALLEL=<number>  Parallel connections (default: 1)"
     echo ""
@@ -267,7 +274,7 @@ run_command() {
     fi
 }
 
-# 等待命令执行完成（带超时）
+# Wait for command execution to complete (with timeout)
 wait_with_timeout() {
     local pid="$1"
     local timeout="$2"
@@ -288,7 +295,7 @@ wait_with_timeout() {
     return 0
 }
 
-# 加载配置文件
+# Load configuration file
 load_config() {
     local mode="$1"
     local config_file="$2"
@@ -300,7 +307,7 @@ load_config() {
         fi
         source "$config_file"
     else
-        # 使用 SCRIPT_DIR 变量（在主脚本中设置）
+        # Use SCRIPT_DIR variable (set in main script)
         local default_config="${SCRIPT_DIR}/config/${mode}.conf"
         if [ ! -f "$default_config" ]; then
             echo "错误：默认配置文件不存在：$default_config"
@@ -309,14 +316,14 @@ load_config() {
         source "$default_config"
     fi
     
-    # 设置默认值
+    # Set default values
     OUTPUT_DIR="${OUTPUT_DIR:-./output}"
     FORMAT="${FORMAT:-txt}"
     CLEANUP="${CLEANUP:-true}"
 }
 
-# 解析多服务器配置
-# 格式：IP:ROLE:描述，多个服务器用逗号分隔
+# Parse multi-server configuration
+# Format: IP:ROLE:description, multiple servers separated by commas
 parse_servers() {
     local servers_str="${SERVERS:-}"
     if [ -z "$servers_str" ]; then
@@ -333,8 +340,8 @@ parse_servers() {
     done
 }
 
-# 解析测试场景配置
-# 格式：CLIENT_IP:SERVER_IP:Duration (Duration is optional)
+# Parse test scenarios configuration
+# Format: CLIENT_IP:SERVER_IP:Duration (Duration is optional)
 parse_test_scenarios() {
     local scenarios_str="${TEST_SCENARIOS:-}"
     if [ -z "$scenarios_str" ]; then
@@ -803,7 +810,7 @@ run_network_test() {
     
     local network_tool="${NETWORK_TOOL:-iperf3}"
     local network_mode="${NETWORK_MODE:-single}"
-    local network_enabled="${NETWORK_ENABLED:-false}"
+    local network_enabled="${NETWORK_ENABLED:-true}"
     local network_client_ip="${NETWORK_CLIENT_IP:-}"
     
     # Check if network test is enabled
@@ -812,9 +819,9 @@ run_network_test() {
         return 0
     fi
     
-    # Skip network test if NETWORK_CLIENT_IP is empty (single machine test has no meaning)
+    # Skip network test if no client IPs are configured (single machine test has no meaning)
     if [ -z "$network_client_ip" ]; then
-        echo "Skipping network test: NETWORK_CLIENT_IP is empty (single machine test has no meaning)"
+        echo "Skipping network test: No client IPs configured (single machine test has no meaning)"
         return 0
     fi
     
@@ -1134,7 +1141,7 @@ parse_iperf3_result() {
     # Display summary
     echo ""
     echo "Network test results:"
-    echo "  Bandwidth: ${bandwidth_mbs} MB/s"
+    echo "  Dynamic Average Bandwidth: ${bandwidth_mbs} MB/s"
     
     # Only show jitter and packet loss for UDP tests (not applicable for TCP)
     if [ "${NETWORK_PROTOCOL:-tcp}" = "udp" ]; then
@@ -1261,7 +1268,7 @@ parse_mutex_result() {
     echo "  P95 Latency: ${p95_latency}ms"
 }
 
-# CPU 测试函数
+# CPU test function
 run_cpu_test() {
     echo "=== CPU Performance Test ==="
     
@@ -1377,7 +1384,7 @@ run_pgbench_test() {
     echo "✓ pgbench test completed"
 }
 
-# 生成报告
+# Generate report
 generate_report() {
     local report_file="$OUTPUT_DIR/report_benchmark_${TIMESTAMP}.txt"
     local combined_file="$OUTPUT_DIR/data_${TIMESTAMP}_all_results.txt"
@@ -1634,16 +1641,20 @@ EOF
                         # Convert bps to MB/s: 1 MB/s = 8,000,000 bps
                         net_bw=$(awk "BEGIN {printf \"%.2f\", $bandwidth_bps / 8000000}" 2>/dev/null || echo "0")
                         
-                        # Extract client IP from the file name (assuming format: network_scenario_1.json)
-                        client_ip=$(echo "$json_file" | grep -oP 'network_scenario_\K[0-9]+' | head -1)
-                        if [ -n "$client_ip" ]; then
-                            client_ip="Client $client_ip"
+                        # Extract client IP from the JSON file
+                        client_ip=$(jq -r '.start.client.host // "N/A"' "$json_file" 2>/dev/null)
+                        if [ -z "$client_ip" ] || [ "$client_ip" = "null" ] || [ "$client_ip" = "N/A" ]; then
+                            # Fallback: get client IP from the file name or use a generic name
+                            local scenario_idx=$(echo "$json_file" | grep -oP 'network_scenario_\K[0-9]+' | head -1)
+                            client_ip="Client $scenario_idx"
                         fi
                     fi
                 fi
                 
                 # Display the result for this client
                 echo "  $client_ip: ${net_bw} MB/s"
+                # Write to report file
+                echo "  $client_ip: ${net_bw} MB/s" >> "$report_file"
                 found_results=true
                 
                 i=$((i + 1))
@@ -1686,30 +1697,30 @@ EOF
 ================================================================================
 EOF
     
-    echo "✓ Report generated: $report_file"
+
 }
 
-# 主函数
+# Main function
 main() {
-    # 解析命令行参数
+    # Parse command line arguments
     parse_args "$@"
     
-    # 设置时间戳
+    # Set timestamp
     TIMESTAMP=$(date '+%Y%m%d_%H%M%S')
     
-    # 创建输出目录
+    # Create output directory
     mkdir -p "$OUTPUT_DIR"
     
-    # 加载配置文件
+    # Load configuration file
     if [ -n "$CONFIG_FILE" ]; then
         load_config "parameter" "$CONFIG_FILE"
     else
-        # 默认使用 parameter.conf
+        # Default to parameter.conf
         local default_config="${SCRIPT_DIR}/parameter.conf"
         if [ -f "$default_config" ]; then
             load_config "parameter" "$default_config"
         else
-            # 尝试在 config 目录中查找
+            # Try to find in config directory
             local config_dir_config="${SCRIPT_DIR}/config/parameter.conf"
             if [ -f "$config_dir_config" ]; then
                 load_config "parameter" "$config_dir_config"
@@ -1723,51 +1734,302 @@ main() {
         fi
     fi
     
-    # 再次处理命令行参数，确保覆盖配置文件的值
+    # Process command line arguments again to ensure they override config file values
     parse_args "$@"
     
-    # 更新 OUTPUT_DIR 环境变量
+    # Process server list (supports file or direct IP list)
+    local target_servers=()
+    local local_ip=$(get_machine_ip)
+    local include_local=false
+    if [ -n "$SERVERS_FILE" ]; then
+        if [ -f "$SERVERS_FILE" ]; then
+            # Read server IP list from file
+            local servers=()
+            mapfile -t servers < "$SERVERS_FILE"
+            
+            # Process each IP, remove whitespace and newlines
+            local filtered_servers=()
+            for ip in "${servers[@]}"; do
+                ip=$(echo "$ip" | tr -d '\r' | xargs)
+                if [ -n "$ip" ]; then
+                    filtered_servers+=("$ip")
+                    if [ "$ip" = "$local_ip" ]; then
+                        include_local=true
+                    fi
+                fi
+            done
+            target_servers=(${filtered_servers[@]})
+        else
+            # Process SERVERS_FILE directly as IP list
+            local ip_list=($SERVERS_FILE)
+            local filtered_ips=()
+            for ip in "${ip_list[@]}"; do
+                ip=$(echo "$ip" | xargs)
+                if [ -n "$ip" ]; then
+                    filtered_ips+=("$ip")
+                    if [ "$ip" = "$local_ip" ]; then
+                        include_local=true
+                    fi
+                fi
+            done
+            target_servers=(${filtered_ips[@]})
+        fi
+        
+        if [ ${#target_servers[@]} -gt 0 ]; then
+            # Local machine as iPerf3 server
+            local server_ip=$(get_machine_ip)
+            # All IPs as clients
+            local client_ips=""
+            for ip in "${target_servers[@]}"; do
+                client_ips+="$ip "
+            done
+            client_ips=$(echo "$client_ips" | xargs)
+            
+            echo "从服务器列表加载配置："
+            echo "  服务器IP: $server_ip (本机)"
+            echo "  客户端IP: $client_ips"
+            echo "  本机作为iPerf3服务器"
+            
+            # Set network test parameters
+            export NETWORK_SERVER_IP="$server_ip"
+            export NETWORK_CLIENT_IP="$client_ips"
+        fi
+    fi
+    
+    # Update OUTPUT_DIR environment variable
     export OUTPUT_DIR
     
-    # 运行检查
+    # Install and distribute sysbench if -i option is specified
+    if [ "${SYSBENCH_INSTALL:-false}" = "true" ]; then
+        install_and_distribute_sysbench
+        echo ""
+        echo "=== Sysbench installation completed successfully! ==="
+        exit 0
+    fi
+    
+    # Run checks
     check_all
     
-    # 运行测试
-    if [ "$CPU_ENABLED" != "false" ]; then
-        run_cpu_test
+    # Run tests
+    if [ ${#target_servers[@]} -gt 0 ]; then
+        # Execute tests for each target server
+        local server_idx=0
+        for target_ip in "${target_servers[@]}"; do
+            server_idx=$((server_idx + 1))
+            echo ""
+            echo "================================================================================"
+            echo "Testing server $server_idx/$(( ${#target_servers[@]} )): $target_ip"
+            echo "================================================================================"
+            
+            # Only execute tests if target IP is local machine or include_local is true
+            if [ "$target_ip" = "$local_ip" ] || [ "$include_local" = "true" ]; then
+                # Here you can add remote test execution logic
+                # For example: Execute tests on remote servers via SSH
+                # Currently executing locally, can be extended to remote execution later
+                
+                if [ "$CPU_ENABLED" != "false" ]; then
+                    run_cpu_test
+                fi
+                
+                if [ "$MEMORY_ENABLED" != "false" ]; then
+                    run_memory_test
+                fi
+                
+                if [ "$IO_ENABLED" != "false" ]; then
+                    run_io_test
+                fi
+                
+                if [ "$THREADS_ENABLED" != "false" ]; then
+                    run_threads_test
+                fi
+                
+                if [ "$MUTEX_ENABLED" != "false" ]; then
+                    run_mutex_test
+                fi
+                
+                if [ "$PGBENCH_ENABLED" = "true" ]; then
+                    run_pgbench_test
+                fi
+            else
+                echo "  Skipping local tests: local machine not in server list"
+            fi
+        done
+        
+        # Execute network test
+        if [ "$NETWORK_ENABLED" != "false" ]; then
+            run_network_test
+        fi
+    else
+        # Single machine test mode
+        if [ "$CPU_ENABLED" != "false" ]; then
+            run_cpu_test
+        fi
+        
+        if [ "$MEMORY_ENABLED" != "false" ]; then
+            run_memory_test
+        fi
+        
+        if [ "$IO_ENABLED" != "false" ]; then
+            run_io_test
+        fi
+        
+        if [ "$NETWORK_ENABLED" != "false" ]; then
+            run_network_test
+        fi
+        
+        if [ "$THREADS_ENABLED" != "false" ]; then
+            run_threads_test
+        fi
+        
+        if [ "$MUTEX_ENABLED" != "false" ]; then
+            run_mutex_test
+        fi
+        
+        if [ "$PGBENCH_ENABLED" = "true" ]; then
+            run_pgbench_test
+        fi
     fi
     
-    if [ "$MEMORY_ENABLED" != "false" ]; then
-        run_memory_test
-    fi
-    
-    if [ "$IO_ENABLED" != "false" ]; then
-        run_io_test
-    fi
-    
-    if [ "$NETWORK_ENABLED" != "false" ]; then
-        run_network_test
-    fi
-    
-    if [ "$THREADS_ENABLED" != "false" ]; then
-        run_threads_test
-    fi
-    
-    if [ "$MUTEX_ENABLED" != "false" ]; then
-        run_mutex_test
-    fi
-    
-    if [ "$PGBENCH_ENABLED" = "true" ]; then
-        run_pgbench_test
-    fi
-    
-    # 生成报告
+    # Generate report
     generate_report
     
     echo ""
     echo "=== Benchmark completed successfully! ==="
     echo "Report: $OUTPUT_DIR/report_benchmark_${TIMESTAMP}.txt"
     echo "Detailed results: $OUTPUT_DIR/data_${TIMESTAMP}_all_results.txt"
+}
+
+# Install and distribute sysbench to target servers
+install_and_distribute_sysbench() {
+    local local_ip=$(get_machine_ip)
+    local sysbench_dir="$HOME/sysbench"
+    local need_compile=false
+    
+    echo "=== Sysbench Installation and Distribution ==="
+    
+    # Check if local machine is in server list and needs compilation
+    if [ ${#target_servers[@]} -gt 0 ]; then
+        # Multi-server mode: check if local machine is in server list
+        local is_local_in_list=false
+        for ip in "${target_servers[@]}"; do
+            if [ "$ip" = "$local_ip" ]; then
+                is_local_in_list=true
+                break
+            fi
+        done
+        
+        # If local machine is in list and no sysbench directory, need to compile
+        if [ "$is_local_in_list" = "true" ] && [ ! -d "$sysbench_dir" ]; then
+            need_compile=true
+        fi
+        
+        # Compile sysbench if needed
+        if [ "$need_compile" = "true" ]; then
+            echo "[Step 1/3] Installing dependencies and compiling sysbench on local machine..."
+            echo "  Local IP: $local_ip"
+            echo "  Sysbench directory: $sysbench_dir"
+            
+            # Check if dependencies are already installed
+            echo "  Checking build dependencies..."
+            if ! command -v gcc &> /dev/null || ! command -v make &> /dev/null || ! command -v automake &> /dev/null; then
+                echo "  Installing build dependencies..."
+                run_command "sudo yum install -y automake autoconf libtool gcc gcc-c++ make" "/dev/null"
+            else
+                echo "  Build dependencies already installed, skipping"
+            fi
+            
+            # Compile sysbench
+            echo "  Compiling sysbench..."
+            run_command "tar -zxf tools/sysbench-1.0.20.tar.gz && cd sysbench-1.0.20 && ./autogen.sh && ./configure --without-mysql --prefix=\$HOME/sysbench && make && make install" "/dev/null"
+            
+            # Configure environment
+            echo "  Configuring environment variables..."
+            run_command "echo 'export PATH=\$PATH:\$HOME/sysbench/bin' >> ~/.bashrc && source ~/.bashrc" "/dev/null"
+            
+            # Cleanup source directory
+            run_command "rm -rf sysbench-1.0.20" "/dev/null"
+            
+            # Verify installation
+            if [ -d "$sysbench_dir" ]; then
+                echo "  ✓ sysbench compiled and installed successfully"
+            else
+                echo "  ✗ sysbench compilation failed"
+                return 1
+            fi
+        else
+            if [ -d "$sysbench_dir" ]; then
+                echo "[Step 1/3] sysbench directory exists on local machine, skipping compilation"
+                echo "  Local IP: $local_ip"
+                echo "  Sysbench directory: $sysbench_dir"
+            else
+                echo "[Step 1/3] Skipping compilation: local machine not in server list"
+            fi
+        fi
+        
+        # Distribute sysbench to other servers if it exists
+        if [ -d "$sysbench_dir" ]; then
+            echo "[Step 2/3] Distributing sysbench to target servers..."
+            echo "  Server list: ${target_servers[*]}"
+            
+            # Create tar package
+            local tar_file="$HOME/sysbench.tar.gz"
+            echo "  Creating tar package: $tar_file"
+            run_command "tar -czf $tar_file -C $HOME sysbench" "/dev/null"
+            
+            # SCP to each server except local machine
+            for ip in "${target_servers[@]}"; do
+                if [ "$ip" != "$local_ip" ]; then
+                    echo "  Distributing to $ip..."
+                    run_command "scp -q $tar_file $ip:$HOME/" "/dev/null"
+                    run_command "ssh -q $ip 'tar -xzf \$HOME/sysbench.tar.gz -C \$HOME && rm -f \$HOME/sysbench.tar.gz && echo '\''export PATH=\$PATH:\$HOME/sysbench/bin'\'' >> ~/.bashrc && source ~/.bashrc && sysbench --version'" "/dev/null"
+                    echo "  ✓ Successfully distributed to $ip"
+                fi
+            done
+            
+            # Cleanup tar file
+            run_command "rm -f $tar_file" "/dev/null"
+            
+            echo "  ✓ sysbench distributed to all target servers"
+        fi
+        
+        echo "[Step 3/3] Installation and distribution completed"
+    else
+        # Single machine mode
+        if [ ! -d "$sysbench_dir" ]; then
+            echo "[Step 1/3] Installing dependencies and compiling sysbench..."
+            echo "  Sysbench directory: $sysbench_dir"
+            
+            # Check if dependencies are already installed
+            echo "  Checking build dependencies..."
+            if ! command -v gcc &> /dev/null || ! command -v make &> /dev/null || ! command -v automake &> /dev/null; then
+                echo "  Installing build dependencies..."
+                run_command "sudo yum install -y automake autoconf libtool gcc gcc-c++ make" "/dev/null"
+            else
+                echo "  Build dependencies already installed, skipping"
+            fi
+            
+            # Compile sysbench
+            echo "  Compiling sysbench..."
+            run_command "tar -zxf tools/sysbench-1.0.20.tar.gz && cd sysbench-1.0.20 && ./autogen.sh && ./configure --without-mysql --prefix=\$HOME/sysbench && make && make install" "/dev/null"
+            
+            # Configure environment
+            echo "  Configuring environment variables..."
+            run_command "echo 'export PATH=\$PATH:\$HOME/sysbench/bin' >> ~/.bashrc && source ~/.bashrc" "/dev/null"
+            
+            # Cleanup source directory
+            run_command "rm -rf sysbench-1.0.20" "/dev/null"
+            
+            # Verify installation
+            if [ -d "$sysbench_dir" ]; then
+                echo "  ✓ sysbench compiled and installed successfully"
+            else
+                echo "  ✗ sysbench compilation failed"
+                return 1
+            fi
+        else
+            echo "  ✓ sysbench directory already exists: $sysbench_dir"
+        fi
+    fi
 }
 
 # 执行主函数

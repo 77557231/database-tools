@@ -85,8 +85,42 @@ sudo apt-get install -y sysbench fio iperf3 jq
 ./vb_benchmark IO_TOOL=fio IO_TEST_PATH=/data FIO_DURATION=30
 
 # Network testing
-./vb_benchmark NETWORK_ENABLED=true NETWORK_SERVER_IP=192.168.1.1
+```bash
+./vb_benchmark -f "192.168.1.101 192.168.1.102"
 ```
+
+#### Install sysbench
+
+Single machine installation:
+```bash
+./vb_benchmark -i
+```
+
+Multi-machine installation (from server list file):
+```bash
+./vb_benchmark -i -f servers.txt
+```
+
+Multi-machine installation (direct IP list):
+```bash
+./vb_benchmark -i -f "192.168.1.101 192.168.1.102 192.168.1.103"
+```
+
+**Installation Logic**:
+
+| Scenario | Behavior |
+|----------|----------|
+| Local machine in IP list and no `$HOME/sysbench` | Compile first, then distribute |
+| Local machine has `$HOME/sysbench` directory | Skip compilation, directly package and distribute |
+| Local machine not in IP list | All servers need distribution (from local existing directory) |
+| SCP distribution | Automatically exclude local machine IP |
+
+**Notes**:
+- `$HOME/sysbench` directory will be created automatically, skip compilation if it already exists
+- For multi-machine installation, if local machine is in the IP list and no `$HOME/sysbench` directory exists, it will compile first then distribute
+- SCP distribution will automatically exclude the local machine IP
+- Target servers need SSH passwordless login configured
+- Environment variables will be automatically configured and take effect after installation
 
 #### Dry Run Mode
 ```bash
@@ -150,8 +184,6 @@ The project uses a single configuration file `config/parameter.conf` to control 
 | Parameter | Description | Default | Example |
 |-----------|-------------|---------|---------|
 | NETWORK_ENABLED | Enable Network test | false | true/false |
-| NETWORK_SERVER_IP | Server IP (auto-detect if empty) | "" | "192.168.1.100" |
-| NETWORK_CLIENT_IP | Client IPs (space-separated for multiple) | "" | "192.168.1.101 192.168.1.102" |
 | NETWORK_PORT | Test port | 25201 | 5201 |
 | NETWORK_PARALLEL | Parallel connections | 1 | 4 |
 
@@ -235,7 +267,6 @@ The project uses a single configuration file `config/parameter.conf` to control 
 **A**: Use `IO_TEST_PATH` parameter: `./vb_benchmark IO_TEST_PATH=/data`
 
 ### Q4: How to configure multi-client for network testing?
-**A**: Use `NETWORK_CLIENT_IP` parameter: `NETWORK_CLIENT_IP="192.168.1.101 192.168.1.102"`
 
 ## Best Practices
 
@@ -255,6 +286,7 @@ This project is licensed under the GNU General Public License v3.0.
 
 | Tag | Date | Changes |
 |-----|------|---------|
+| 0.3.0 | 2026-04-20 | Added support for controlling whether local machine participates in testing through -f server IP list, local machine will not participate if not in IP list; Added support for compiling and distributing sysbench to target cluster server list |
 | 0.2.0 | 2026-04-17 | Refactored to remove lib directory, merged all functions into main script, added command line parameter support with override capability, updated documentation to English |
 | 0.1.0 | 2026-04-16 | Initial release with basic benchmarking functionality |
 
