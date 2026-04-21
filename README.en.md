@@ -67,7 +67,8 @@ sudo apt-get install -y sysbench fio iperf3 jq
 ./vb_benchmark -c path/parameter.conf
 ```
 
-#### Command Line Parameter Override
+#### Command line parameter override
+
 ```bash
 # Override test duration
 ./vb_benchmark DURATION=60
@@ -78,15 +79,51 @@ sudo apt-get install -y sysbench fio iperf3 jq
 # Disable specific tests
 ./vb_benchmark MEMORY_ENABLED=false NETWORK_ENABLED=false
 
-# Use fio for IO testing
+# Use fio for IO test
 ./vb_benchmark IO_TOOL=fio
 
-# Set fio test duration and path
-./vb_benchmark IO_TOOL=fio IO_TEST_PATH=/data FIO_DURATION=30
+# Set fio test duration and directory
+```
 
-# Network testing
+#### Run specific test (subcommand)
+
 ```bash
-./vb_benchmark -f "192.168.1.101 192.168.1.102"
+# Run CPU test
+./vb_benchmark cpu
+
+# Run memory test
+./vb_benchmark mem
+
+# Run IO test
+./vb_benchmark io
+
+# Run network test (matrix mode)
+./vb_benchmark network -f servers.txt NETWORK_MODE=matrix
+
+# Run threads test
+./vb_benchmark thread
+
+# Run mutex test
+./vb_benchmark mutex
+
+# Run all tests (default)
+./vb_benchmark all
+```
+
+#### Combine subcommand with parameters
+
+```bash
+# Run CPU test with specific parameters
+./vb_benchmark cpu DURATION=20 CPU_MAX_PRIME=10000
+
+# Run IO test with fio
+./vb_benchmark io IO_TOOL=fio FIO_DURATION=30
+
+# Run network test with server list
+./vb_benchmark network -f "192.168.1.101 192.168.1.102" NETWORK_MODE=parallel
+
+# Matrix network test (all-to-all cross testing)
+./vb_benchmark -f servers.txt NETWORK_MODE=matrix
 ```
 
 #### Install sysbench
@@ -286,6 +323,7 @@ This project is licensed under the GNU General Public License v3.0.
 
 | Tag | Date | Changes |
 |-----|------|---------|
+| 0.4.0 | 2026-04-21 | Refactored command line parameters, added subcommand support (cpu/mem/io/network/thread/mutex/all), optimized help information display, categorized test parameters |
 | 0.3.0 | 2026-04-20 | Added support for controlling whether local machine participates in testing through -f server IP list, local machine will not participate if not in IP list; Added support for compiling and distributing sysbench to target cluster server list |
 | 0.2.0 | 2026-04-17 | Refactored to remove lib directory, merged all functions into main script, added command line parameter support with override capability, updated documentation to English |
 | 0.1.0 | 2026-04-16 | Initial release with basic benchmarking functionality |

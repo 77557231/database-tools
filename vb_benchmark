@@ -16,6 +16,27 @@ CONFIG_FILE=""
 OUTPUT_DIR="./output"
 DRY_RUN=false
 
+# Trap Ctrl+C (SIGINT) to clean up processes
+trap cleanup SIGINT
+
+# Cleanup function to handle Ctrl+C and exit
+cleanup() {
+    echo ""
+    echo "=== Cleaning up processes ==="
+    
+    # Kill iperf3 servers
+    pkill -f "iperf3 -s" 2>/dev/null || true
+    
+    # Kill any running sysbench processes
+    pkill -f "sysbench" 2>/dev/null || true
+    
+    # Kill any running fio processes
+    pkill -f "fio" 2>/dev/null || true
+    
+    echo "✓ Cleanup completed"
+    exit 1
+}
+
 # Export immediately for library functions
 export OUTPUT_DIR
 
@@ -23,8 +44,9 @@ export OUTPUT_DIR
 parse_args() {
     local OPTIND=1
     local remaining_args=()
+    local subcommand="all"
     
-    # First pass: extract options and their arguments
+    # First pass: extract options and subcommand
     while [ $OPTIND -le $# ]; do
         case "${!OPTIND}" in
             --)
@@ -93,12 +115,85 @@ parse_args() {
                 show_help
                 exit 1
                 ;;
+            cpu|mem|io|network|thread|mutex|all)
+                # Subcommand
+                subcommand="${!OPTIND}"
+                local OPTIND=$((OPTIND + 1))
+                ;;
             *)
                 remaining_args+=("${!OPTIND}")
                 local OPTIND=$((OPTIND + 1))
                 ;;
         esac
     done
+    
+    # Set test enable flags based on subcommand
+    case "$subcommand" in
+        cpu)
+            export CPU_ENABLED=true
+            export MEMORY_ENABLED=false
+            export IO_ENABLED=false
+            export NETWORK_ENABLED=false
+            export THREADS_ENABLED=false
+            export MUTEX_ENABLED=false
+            export PGBENCH_ENABLED=false
+            ;;
+        mem)
+            export CPU_ENABLED=false
+            export MEMORY_ENABLED=true
+            export IO_ENABLED=false
+            export NETWORK_ENABLED=false
+            export THREADS_ENABLED=false
+            export MUTEX_ENABLED=false
+            export PGBENCH_ENABLED=false
+            ;;
+        io)
+            export CPU_ENABLED=false
+            export MEMORY_ENABLED=false
+            export IO_ENABLED=true
+            export NETWORK_ENABLED=false
+            export THREADS_ENABLED=false
+            export MUTEX_ENABLED=false
+            export PGBENCH_ENABLED=false
+            ;;
+        network)
+            export CPU_ENABLED=false
+            export MEMORY_ENABLED=false
+            export IO_ENABLED=false
+            export NETWORK_ENABLED=true
+            export THREADS_ENABLED=false
+            export MUTEX_ENABLED=false
+            export PGBENCH_ENABLED=false
+            ;;
+        thread)
+            export CPU_ENABLED=false
+            export MEMORY_ENABLED=false
+            export IO_ENABLED=false
+            export NETWORK_ENABLED=false
+            export THREADS_ENABLED=true
+            export MUTEX_ENABLED=false
+            export PGBENCH_ENABLED=false
+            ;;
+        mutex)
+            export CPU_ENABLED=false
+            export MEMORY_ENABLED=false
+            export IO_ENABLED=false
+            export NETWORK_ENABLED=false
+            export THREADS_ENABLED=false
+            export MUTEX_ENABLED=true
+            export PGBENCH_ENABLED=false
+            ;;
+        all)
+            # Default: enable all tests
+            export CPU_ENABLED=true
+            export MEMORY_ENABLED=true
+            export IO_ENABLED=true
+            export NETWORK_ENABLED=true
+            export THREADS_ENABLED=true
+            export MUTEX_ENABLED=true
+            export PGBENCH_ENABLED=false
+            ;;
+    esac
     
     # Process remaining arguments as KEY=VALUE pairs
     for arg in "${remaining_args[@]}"; do
@@ -112,10 +207,16 @@ parse_args() {
 
 # Show help information
 show_help() {
-    echo "Usage: $0 [options] [KEY=VALUE ...]"
+    echo "Usage: $0 [options] [command] [KEY=VALUE ...]"
     echo ""
-    echo "Support three configuration modes: parameter mode and configuration file mode, or mixed mode."
-    echo "When both parameters and configuration file are configured, parameters will override configuration file."
+    echo "Commands:"
+    echo "  all           Run all tests (default)"
+    echo "  cpu           Run only CPU test"
+    echo "  mem           Run only memory test"
+    echo "  io            Run only IO test"
+    echo "  network       Run only network test"
+    echo "  thread        Run only threads test"
+    echo "  mutex         Run only mutex test"
     echo ""
     echo "Options:"
     echo "  -c <config_file>  Specify configuration file path (default: config/parameter.conf)"
@@ -125,26 +226,22 @@ show_help() {
     echo "  -d                Dry run mode (show commands without execution)"
     echo "  -h                Show this help message"
     echo ""
-    echo "Test parameters (KEY=VALUE format):"
-    echo "  === Core ==="
+    echo "Common parameters (KEY=VALUE format):"
     echo "  DURATION=<seconds>          Unified test duration (default: 10)"
     echo "  OUTPUT_DIR=<path>           Output directory (default: ./output)"
     echo "  CLEANUP=true|false          Cleanup temp files after test (default: true)"
     echo ""
-    echo "  === CPU Test ==="
-    echo "  CPU_ENABLED=true|false      Enable CPU test (default: true)"
+    echo "CPU test parameters:"
     echo "  CPU_THREADS=<number>        CPU test threads, 0=auto (default: 0)"
     echo "  CPU_MAX_PRIME=<number>      Max prime number for CPU test (default: 20000)"
     echo ""
-    echo "  === Memory Test ==="
-    echo "  MEMORY_ENABLED=true|false   Enable Memory test (default: true)"
+    echo "Memory test parameters:"
     echo "  MEMORY_THREADS=<number>     Memory test threads, 0=auto (default: 0)"
     echo "  MEMORY_BLOCK_SIZE=<size>    Block size, e.g. 8K (default: 8K)"
     echo "  MEMORY_TOTAL_SIZE=<size>    Total test size, e.g. 20G (default: 20G)"
     echo "  MEMORY_OPER=read|write      Memory operation (default: read)"
     echo ""
-    echo "  === IO Test ==="
-    echo "  IO_ENABLED=true|false       Enable IO test (default: true)"
+    echo "IO test parameters:"
     echo "  IO_TOOL=sysbench|fio        IO test tool (default: sysbench)"
     echo "  IO_TOTAL_SIZE=<size>        Total file size for IO test (default: 1G)"
     echo "  IO_TEST_MODE=<mode>         Test mode: rndrw|read|write (default: rndrw)"
@@ -152,34 +249,40 @@ show_help() {
     echo "  IO_TEST_PATH=<path>         Test directory path (default: /tmp)"
     echo "  FIO_DURATION=<seconds>      fio test duration (default: same as DURATION)"
     echo ""
-    echo "  === Network Test ==="
-    echo "  NETWORK_ENABLED=true|false  Enable Network test (default: true)"
-
+    echo "Network test parameters:"
+    echo "  NETWORK_MODE=serial|parallel|matrix  Network test mode (default: serial)"
     echo "  NETWORK_PORT=<port>        Test port (default: 25201)"
     echo "  NETWORK_PARALLEL=<number>  Parallel connections (default: 1)"
     echo ""
-    echo "  === Threads Test ==="
-    echo "  THREADS_ENABLED=true|false  Enable Threads test (default: true)"
+    echo "Threads test parameters:"
     echo "  THREADS_NUM=<number>        Number of threads (default: 1000)"
     echo "  THREADS_YIELDS=<number>     Number of yields per thread (default: 100)"
     echo "  THREADS_LOCKS=<number>      Number of locks (default: 4)"
     echo ""
-    echo "  === Mutex Test ==="
-    echo "  MUTEX_ENABLED=true|false    Enable Mutex test (default: true)"
+    echo "Mutex test parameters:"
     echo "  MUTEX_THREADS=<number>      Mutex test threads, 0=auto (default: 0)"
     echo "  MUTEX_NUM=<number>          Number of mutexes (default: 1024)"
     echo ""
-    echo "  === pgbench Test ==="
+    echo "pgbench test parameters:"
     echo "  PGBENCH_ENABLED=true|false  Enable pgbench test (default: false)"
     echo "  PGBENCH_DB=<database>       pgbench database name (default: pgbench_db)"
     echo "  PGBENCH_THREADS=<number>    pgbench threads, 0=auto (default: 0)"
     echo "  PGBENCH_DURATION=<seconds>  pgbench test duration (default: 300)"
     echo ""
     echo "Examples:"
-    echo "  $0 -c parameter.conf DURATION=30 CPU_MAX_PRIME=10000"
-    echo "  $0 DURATION=60 CPU_ENABLED=true MEMORY_ENABLED=false"
-    echo "  $0 IO_TOOL=fio IO_TEST_PATH=/data FIO_DURATION=30"
-    echo "  $0 NETWORK_ENABLED=true NETWORK_SERVER_IP=\"192.168.1.1\"\"192.168.1.2\""
+    echo "  # Run all tests"
+    echo "  $0"
+    echo "  $0 DURATION=30"
+    echo ""
+    echo "  # Run specific test"
+    echo "  $0 cpu"
+    echo "  $0 mem DURATION=20"
+    echo "  $0 io IO_TOOL=fio"
+    echo "  $0 network -f servers.txt NETWORK_MODE=matrix"
+    echo ""
+    echo "  # Use configuration file"
+    echo "  $0 -c parameter.conf"
+    echo "  $0 cpu -c parameter.conf CPU_MAX_PRIME=10000"
     echo ""
     echo "Project structure:"
     echo "  vb_benchmark/"
@@ -269,8 +372,10 @@ run_command() {
     
     if [ -n "$output_file" ]; then
         eval "$cmd" > "$output_file" 2>&1
+        return $?
     else
         eval "$cmd"
+        return $?
     fi
 }
 
@@ -589,6 +694,7 @@ run_sysbench_fileio() {
         --file-total-size=\"${IO_TOTAL_SIZE:-1G}\" \
         --file-test-mode=\"${IO_TEST_MODE:-rndrw}\" \
         --file-num=\"${IO_FILE_NUM:-1}\" \
+        --file-test-dir=\"${IO_TEST_PATH:-/tmp}\" \
         prepare" "/dev/null"
     
     # Run test
@@ -597,6 +703,7 @@ run_sysbench_fileio() {
         --file-test-mode=\"${IO_TEST_MODE:-rndrw}\" \
         --time=\"${IO_DURATION:-120}\" \
         --file-num=\"${IO_FILE_NUM:-1}\" \
+        --file-test-dir=\"${IO_TEST_PATH:-/tmp}\" \
         run" "$temp_output_file"
     
     # Cleanup test files
@@ -604,6 +711,7 @@ run_sysbench_fileio() {
         --file-total-size=\"${IO_TOTAL_SIZE:-1G}\" \
         --file-test-mode=\"${IO_TEST_MODE:-rndrw}\" \
         --file-num=\"${IO_FILE_NUM:-1}\" \
+        --file-test-dir=\"${IO_TEST_PATH:-/tmp}\" \
         cleanup" "/dev/null"
     
     # Parse result and display detailed output
@@ -831,15 +939,17 @@ run_network_test() {
         return 1
     fi
     
-    if [ "$network_mode" = "multi-server" ]; then
-        run_multi_server_network_test
+    if [ "$network_mode" = "parallel" ]; then
+        run_parallel_network_test
+    elif [ "$network_mode" = "matrix" ]; then
+        run_matrix_network_test
     else
-        run_single_network_test
+        run_serial_network_test
     fi
 }
 
-# Single server network test
-run_single_network_test() {
+# Serial network test (sequential testing)
+run_serial_network_test() {
     local port="${NETWORK_PORT:-25201}"
     local duration="${DURATION:-20}"
     local parallel="${NETWORK_PARALLEL:-1}"
@@ -874,14 +984,20 @@ run_single_network_test() {
     
     # Start iperf3 server in background
     echo "  Starting iperf3 server on port $port..."
-    run_command "iperf3 -s -p \"$port\" -D" "/dev/null"
-    iperf3_pid=$!
-    sleep 2  # Wait for server to start
-    
-    # Verify server is running using pidof (more reliable than pgrep)
-    if ! pidof iperf3 > /dev/null; then
-        echo "⚠ Failed to start iperf3 server"
-        return 1
+    if [ "$DRY_RUN" = true ]; then
+        # Dry run mode: just show the command
+        echo "[DRY RUN] iperf3 -s -p \"$port\" -D"
+        echo "[DRY RUN] Server would start on $server_ip:$port"
+    else
+        # Actual run: start the server
+        run_command "iperf3 -s -p \"$port\" -D" "/dev/null"
+        sleep 2  # Wait for server to start
+        
+        # Verify server is running using pidof (more reliable than pgrep)
+        if ! pidof iperf3 > /dev/null; then
+            echo "⚠ Failed to start iperf3 server"
+            return 1
+        fi
     fi
     
     # Execute tests for each client IP sequentially
@@ -894,46 +1010,78 @@ run_single_network_test() {
             echo "  [Test $client_idx/$num_clients] Testing from client: $client"
         fi
         
+        # Skip test if client and server are the same IP (loopback test)
+        if [ "$client" = "$server_ip" ]; then
+            echo "  ⚠ Skipping loopback test (client and server are the same IP)"
+            echo "  Loopback tests do not represent real network performance"
+            continue
+        fi
+        
         # Calculate timeout: duration + 15s buffer for each client
         local client_timeout=$((duration + 15))
         local client_output_file="$output_dir/network_scenario_${client_idx}.json"
         local client_text_output="$output_dir/network_scenario_${client_idx}_text.txt"
         
         # Run iperf3 client with timeout and capture both JSON and text output
-        if run_command "timeout $client_timeout iperf3 -c \"$server_ip\" \
-            -p \"$port\" \
-            -t \"$duration\" \
-            -P \"$parallel\" \
-            -J" "$client_output_file"; then
-            
-            # Capture text format output for per-second data
-            run_command "iperf3 -c \"$server_ip\" -p \"$port\" -t \"$duration\" -P \"$parallel\" 2>&1 | grep -v \"^$\"" "$client_text_output"
-            
-            # Parse and display result
-            parse_iperf3_result "$client_output_file"
-            
-            # Display per-second throughput
-            display_per_second_throughput "$client_text_output" "$server_ip (from $client)"
-            
-            # Append to combined results file
-            append_to_combined_result "NETWORK TEST RESULTS ($server_ip from $client)" "$client_text_output"
-            
-            echo "  ✓ Client $client test completed"
+        if [ "$DRY_RUN" = true ]; then
+            # Dry run mode: just show the commands
+            echo "[DRY RUN] timeout $client_timeout iperf3 -c \"$server_ip\" -p \"$port\" -t \"$duration\" -P \"$parallel\" -J"
+            echo "[DRY RUN] iperf3 -c \"$server_ip\" -p \"$port\" -t \"$duration\" -P \"$parallel\" 2>&1 | grep -v \"^$\""
+            echo "  [DRY RUN] Test would complete: $client -> $server_ip"
         else
-            echo "  ⚠ Client $client test failed or timed out"
+            # Actual run: execute the client test
+            # Check if client is reachable first
+            if ! ping -c 1 -W 2 "$client" > /dev/null 2>&1; then
+                echo "  ⚠ Client $client is unreachable"
+                continue
+            fi
+            
+            # Check if iperf3 is installed on client
+            if ! ssh "$client" "command -v iperf3 > /dev/null 2>&1"; then
+                echo "  ⚠ iperf3 not installed on client $client"
+                echo "  Please run: ssh $client 'sudo yum install -y iperf3'"
+                continue
+            fi
+            
+            echo "  Running test: $client -> $server_ip"
+            
+            if run_command "timeout $client_timeout ssh $client 'iperf3 -c "$server_ip" -p "$port" -t "$duration" -P "$parallel" -J'" "$client_output_file"; then
+                
+                # Capture text format output for per-second data
+                run_command "ssh $client 'iperf3 -c "$server_ip" -p "$port" -t "$duration" -P "$parallel" 2>&1 | grep -v \"^$\"'" "$client_text_output"
+                
+                # Parse and display result
+                parse_iperf3_result "$client_output_file"
+                
+                # Display per-second throughput
+                display_per_second_throughput "$client_text_output" "$server_ip (from $client)"
+                
+                # Append to combined results file
+                append_to_combined_result "NETWORK TEST RESULTS ($server_ip from $client)" "$client_text_output"
+                
+                echo "  ✓ Client $client test completed"
+            else
+                echo "  ⚠ Client $client test failed or timed out"
+                echo "  Possible issues: firewall, iperf3 not running, or network issues"
+            fi
         fi
         
         # Keep the files for report generation
     done
     
-    echo ""
-    echo "✓ Network test completed for all clients"
+    echo ""    
+echo "✓ Network test completed for all clients"    
     
-    # Stop iperf3 server
-    echo "  Stopping iperf3 server..."
-    kill "$iperf3_pid" 2>/dev/null || true
-    pkill -f "iperf3 -s -p $port" 2>/dev/null || true
-    sleep 1
+    # Stop iperf3 server    
+echo "  Stopping iperf3 server..."    
+if [ "$DRY_RUN" = true ]; then    
+    # Dry run mode: just show the commands    
+echo "[DRY RUN] pkill -f \"iperf3 -s -p $port\""    
+else    
+    # Actual run: stop the server    
+pkill -f "iperf3 -s -p $port" 2>/dev/null || true    
+sleep 1    
+fi
     
     return 0
 }
@@ -1118,6 +1266,478 @@ run_multi_server_network_test() {
     echo "✓ Multi-server network test completed"
 }
 
+# Matrix network test (all-to-all cross testing)
+run_matrix_network_test() {
+    echo "=== Matrix Network Performance Test (All-to-All) ==="
+    
+    local port="${NETWORK_PORT:-25201}"
+    local duration="${DURATION:-20}"
+    local parallel="${NETWORK_PARALLEL:-1}"
+    
+    # Create output directory if it doesn't exist
+    local output_dir="$OUTPUT_DIR"
+    mkdir -p "$output_dir"
+    
+    # Get all host IPs from server list or NETWORK_CLIENT_IP
+    local host_ips=()
+    if [ ${#target_servers[@]} -gt 0 ]; then
+        host_ips=(${target_servers[@]})
+    else
+        # Use NETWORK_CLIENT_IP if server list not provided
+        local client_ip="${NETWORK_CLIENT_IP:-}"
+        if [ -z "$client_ip" ]; then
+            echo "Skipping matrix network test: No client IPs configured"
+            return 0
+        fi
+        host_ips=($client_ip)
+    fi
+    
+    local num_hosts=${#host_ips[@]}
+    
+    if [ $num_hosts -lt 2 ]; then
+        echo "Skipping matrix network test: At least 2 hosts required for matrix testing"
+        return 0
+    fi
+    
+    echo "Starting matrix network test..."
+    echo "  Hosts: ${host_ips[*]}"
+    echo "  Test duration: ${duration}s per pair"
+    echo "  Parallel connections: $parallel"
+    echo "  Total test pairs: $((num_hosts * (num_hosts - 1)))"
+    
+    # Generate all possible host pairs (A→B and B→A)
+    local test_pairs=()
+    for ((i=0; i<num_hosts; i++)); do
+        for ((j=0; j<num_hosts; j++)); do
+            if [ $i -ne $j ]; then
+                test_pairs+=("${host_ips[i]}|${host_ips[j]}")
+            fi
+        done
+    done
+    
+    local num_pairs=${#test_pairs[@]}
+    echo "  Total test scenarios: $num_pairs"
+    
+    # Create results array
+    local results=()
+    
+    # Execute tests for each pair
+    local pair_idx=0
+    for pair in "${test_pairs[@]}"; do
+        pair_idx=$((pair_idx + 1))
+        IFS='|' read -r src dst <<< "$pair"
+        
+        echo ""
+        echo "  [Test $pair_idx/$num_pairs] Testing: $src -> $dst"
+        
+        # Start iperf3 server on destination
+        echo "  Starting iperf3 server on $dst..."
+        run_command "ssh $dst 'iperf3 -s -p $port -D'" "/dev/null"
+        
+        if [ "$DRY_RUN" != true ]; then
+            sleep 3  # Wait for server to start
+        fi
+        
+        # Run iperf3 client from source
+        local client_output_file="$output_dir/network_matrix_${pair_idx}.json"
+        local client_text_output="$output_dir/network_matrix_${pair_idx}_text.txt"
+        
+        echo "  Running iperf3 client from $src to $dst..."
+        if run_command "ssh $src 'iperf3 -c $dst -p $port -t $duration -P $parallel -J'" "$client_output_file"; then
+            
+            # Capture text format output
+            run_command "ssh $src 'iperf3 -c $dst -p $port -t $duration -P $parallel 2>&1 | grep -v ^$'" "$client_text_output"
+            
+            # Parse result
+            if [ "$DRY_RUN" != true ] && [ -f "$client_output_file" ]; then
+                local bandwidth=$(parse_iperf3_matrix_result "$client_output_file")
+                results+=("$src|$dst|$bandwidth")
+                
+                # Display per-second throughput
+                display_per_second_throughput "$client_text_output" "$dst (from $src)"
+                
+                # Append to combined results file
+                append_to_combined_result "NETWORK MATRIX TEST RESULTS ($src -> $dst)" "$client_text_output"
+                
+                echo "  ✓ Test completed: $src -> $dst = ${bandwidth} MB/s"
+            else
+                if [ "$DRY_RUN" = true ]; then
+                    results+=("$src|$dst|0")
+                    echo "  [DRY RUN] Test would complete: $src -> $dst"
+                else
+                    results+=("$src|$dst|0")
+                    echo "  ⚠ Test failed: $src -> $dst"
+                fi
+            fi
+        else
+            results+=("$src|$dst|0")
+            echo "  ⚠ Test failed: $src -> $dst"
+        fi
+        
+        # Stop iperf3 server on destination
+        run_command "ssh $dst 'pkill -f \"iperf3 -s -p $port\"'" "/dev/null"
+        
+        if [ "$DRY_RUN" != true ]; then
+            sleep 1
+        fi
+    done
+    
+    # Generate matrix report
+    generate_matrix_report "${results[@]}" "${host_ips[@]}"
+    
+    echo ""
+    echo "✓ Matrix network test completed"
+}
+
+# Parallel network test (concurrent testing)
+run_parallel_network_test() {
+    echo "=== Parallel Network Performance Test ==="
+    
+    local port="${NETWORK_PORT:-25201}"
+    local duration="${DURATION:-20}"
+    local parallel="${NETWORK_PARALLEL:-1}"
+    
+    # Create output directory if it doesn't exist
+    local output_dir="$OUTPUT_DIR"
+    mkdir -p "$output_dir"
+    
+    # Get all host IPs from server list or NETWORK_CLIENT_IP
+    local host_ips=()
+    if [ ${#target_servers[@]} -gt 0 ]; then
+        host_ips=(${target_servers[@]})
+    else
+        # Use NETWORK_CLIENT_IP if server list not provided
+        local client_ip="${NETWORK_CLIENT_IP:-}"
+        if [ -z "$client_ip" ]; then
+            echo "Skipping parallel network test: No client IPs configured"
+            return 0
+        fi
+        host_ips=($client_ip)
+    fi
+    
+    local num_hosts=${#host_ips[@]}
+    
+    if [ $num_hosts -lt 2 ]; then
+        echo "Skipping parallel network test: At least 2 hosts required"
+        return 0
+    fi
+    
+    echo "Starting parallel network test..."
+    echo "  Hosts: ${host_ips[*]}"
+    echo "  Test duration: ${duration}s"
+    echo "  Parallel connections: $parallel"
+    
+    # Use the first host as server
+    local server_ip="${host_ips[0]}"
+    echo "  Server: $server_ip"
+    
+    # Start iperf3 server on the first host
+    echo "  Starting iperf3 server on $server_ip..."
+    run_command "ssh $server_ip 'iperf3 -s -p $port -D'" "/dev/null"
+    
+    if [ "$DRY_RUN" != true ]; then
+        sleep 3  # Wait for server to start
+    fi
+    
+    # Create results array
+    local results=()
+    local pids=()
+    local output_files=()
+    
+    # Run tests in parallel for all other hosts as clients
+    local client_idx=0
+    for ((i=1; i<num_hosts; i++)); do
+        local client_ip="${host_ips[$i]}"
+        client_idx=$((client_idx + 1))
+        
+        echo "  Starting test $client_idx: $client_ip -> $server_ip"
+        
+        local client_output_file="$output_dir/network_parallel_${client_idx}.json"
+        local client_text_output="$output_dir/network_parallel_${client_idx}_text.txt"
+        
+        # Run iperf3 client in background
+        if [ "$DRY_RUN" = true ]; then
+            echo "[DRY RUN] ssh $client_ip 'iperf3 -c $server_ip -p $port -t $duration -P $parallel -J'"
+            echo "[DRY RUN] ssh $client_ip 'iperf3 -c $server_ip -p $port -t $duration -P $parallel 2>&1 | grep -v ^$'"
+            results+=("$client_ip|$server_ip|0")
+            echo "  [DRY RUN] Test would complete: $client_ip -> $server_ip"
+        else
+            # Run iperf3 client and capture output
+            ssh $client_ip "iperf3 -c $server_ip -p $port -t $duration -P $parallel -J" > "$client_output_file" 2>&1 &
+            local pid=$!
+            pids+=("$pid")
+            output_files+=("$client_output_file")
+        fi
+    done
+    
+    # Wait for all background processes to complete
+    if [ "$DRY_RUN" != true ]; then
+        for ((i=0; i<${#pids[@]}; i++)); do
+            local pid="${pids[$i]}"
+            local output_file="${output_files[$i]}"
+            wait "$pid"
+            
+            # Parse result
+            if [ -f "$output_file" ]; then
+                local client_ip="${host_ips[$((i+1))]}"
+                local bandwidth=$(parse_iperf3_matrix_result "$output_file")
+                results+=("$client_ip|$server_ip|$bandwidth")
+                echo "  ✓ Test completed: $client_ip -> $server_ip = ${bandwidth} MB/s"
+            else
+                local client_ip="${host_ips[$((i+1))]}"
+                results+=("$client_ip|$server_ip|0")
+                echo "  ⚠ Test failed: $client_ip -> $server_ip"
+            fi
+        done
+    fi
+    
+    # Stop iperf3 server
+    run_command "ssh $server_ip 'pkill -f \"iperf3 -s -p $port\"'" "/dev/null"
+    
+    if [ "$DRY_RUN" != true ]; then
+        sleep 1
+    fi
+    
+    # Generate parallel test report
+    generate_parallel_report "${results[@]}" "$server_ip"
+    
+    echo ""
+    echo "✓ Parallel network test completed"
+}
+
+# Generate parallel test report
+generate_parallel_report() {
+    local results=($1)
+    local server_ip="$2"
+    local report_file="$OUTPUT_DIR/network_parallel_report_${TIMESTAMP}.txt"
+    
+    echo "Generating parallel network test report..."
+    
+    # Create report header
+    cat > "$report_file" << EOF
+================================================================================
+                           Parallel Network Test Report
+================================================================================
+
+Test Time: $(date '+%Y-%m-%d %H:%M:%S')
+Test Duration: ${DURATION:-20}s
+Parallel Connections: ${NETWORK_PARALLEL:-1}
+Server: $server_ip
+
+================================================================================
+                               Test Results
+================================================================================
+EOF
+    
+    # Create results table
+    echo -n "Client IP" >> "$report_file"
+    printf "\t%15s" "Bandwidth (MB/s)" >> "$report_file"
+    echo >> "$report_file"
+    
+    # Calculate statistics
+    local total_bw=0
+    local count=0
+    local min_bw=999999
+    local max_bw=0
+    local bw_values=()
+    
+    for result in "${results[@]}"; do
+        IFS='|' read -r client_ip r_server_ip r_bw <<< "$result"
+        printf "%15s" "$client_ip" >> "$report_file"
+        printf "\t%15s" "$r_bw" >> "$report_file"
+        echo >> "$report_file"
+        
+        if [ "$r_bw" != "0" ]; then
+            total_bw=$(echo "$total_bw + $r_bw" | bc)
+            count=$((count + 1))
+            bw_values+=("$r_bw")
+            if (( $(echo "$r_bw < $min_bw" | bc -l) )); then
+                min_bw="$r_bw"
+            fi
+            if (( $(echo "$r_bw > $max_bw" | bc -l) )); then
+                max_bw="$r_bw"
+            fi
+        fi
+    done
+    
+    # Calculate average and median
+    local avg_bw="0"
+    local median_bw="0"
+    if [ $count -gt 0 ]; then
+        avg_bw=$(echo "$total_bw / $count" | bc -l)
+        # Sort bandwidth values for median
+        IFS=$'\n' sorted_bw=($(sort -g <<< "${bw_values[*]}"))
+        unset IFS
+        local mid=$((count / 2))
+        if [ $((count % 2)) -eq 0 ]; then
+            median_bw=$(echo "(${sorted_bw[$mid-1]} + ${sorted_bw[$mid]}) / 2" | bc -l)
+        else
+            median_bw="${sorted_bw[$mid]}"
+        fi
+    fi
+    
+    # Add statistics to report
+    cat >> "$report_file" << EOF
+
+================================================================================
+                                Statistics
+================================================================================
+Total bandwidth: $(printf "%.2f" $total_bw) MB/s
+Average bandwidth: $(printf "%.2f" $avg_bw) MB/s
+Minimum bandwidth: $(printf "%.2f" $min_bw) MB/s
+Maximum bandwidth: $(printf "%.2f" $max_bw) MB/s
+Median bandwidth: $(printf "%.2f" $median_bw) MB/s
+Total test clients: $count
+
+================================================================================
+EOF
+    
+    echo "  ✓ Parallel report generated: $report_file"
+    
+    # Append report to combined results
+    append_to_combined_result "PARALLEL NETWORK TEST REPORT" "$report_file"
+}
+
+# Parse iperf3 result for matrix test
+parse_iperf3_matrix_result() {
+    local json_file="$1"
+    
+    # Check if jq is installed
+    if ! command -v jq &> /dev/null; then
+        echo "0"
+        return
+    fi
+    
+    if [ ! -f "$json_file" ]; then
+        echo "0"
+        return
+    fi
+    
+    # Extract JSON content by removing any leading non-JSON text
+    local json_content=$(awk 'BEGIN{found=0} /^\{/{found=1} found{print} /^\}/{if(found) exit}' "$json_file" 2>/dev/null || cat "$json_file")
+    
+    # Extract metrics
+    local bandwidth_bps=$(echo "$json_content" | jq -r '.end.sum_received.bits_per_second // 0' 2>/dev/null)
+    # Convert bps to MB/s: 1 MB/s = 8,000,000 bps
+    local bandwidth_mbs=$(awk "BEGIN {printf \"%.2f\", $bandwidth_bps / 8000000}" 2>/dev/null || echo "0")
+    
+    echo "$bandwidth_mbs"
+}
+
+# Generate matrix report
+generate_matrix_report() {
+    local results=($1)
+    local hosts=($2)
+    local report_file="$OUTPUT_DIR/network_matrix_report_${TIMESTAMP}.txt"
+    
+    echo "Generating matrix network test report..."
+    
+    # Create report header
+    cat > "$report_file" << EOF
+================================================================================
+                           Matrix Network Test Report
+================================================================================
+
+Test Time: $(date '+%Y-%m-%d %H:%M:%S')
+Test Duration: ${DURATION:-20}s per pair
+Parallel Connections: ${NETWORK_PARALLEL:-1}
+
+Hosts: ${hosts[*]}
+
+================================================================================
+                              Bandwidth Matrix (MB/s)
+================================================================================
+EOF
+    
+    # Create matrix header
+    echo -n "FROM\\TO" >> "$report_file"
+    for host in "${hosts[@]}"; do
+        printf "\t%15s" "$host" >> "$report_file"
+    done
+    echo >> "$report_file"
+    
+    # Create matrix rows
+    for src in "${hosts[@]}"; do
+        printf "%15s" "$src" >> "$report_file"
+        for dst in "${hosts[@]}"; do
+            if [ "$src" = "$dst" ]; then
+                printf "\t%15s" "-" >> "$report_file"
+            else
+                # Find result for this pair
+                local bandwidth="0"
+                for result in "${results[@]}"; do
+                    IFS='|' read -r r_src r_dst r_bw <<< "$result"
+                    if [ "$r_src" = "$src" ] && [ "$r_dst" = "$dst" ]; then
+                        bandwidth="$r_bw"
+                        break
+                    fi
+                done
+                printf "\t%15s" "$bandwidth" >> "$report_file"
+            fi
+        done
+        echo >> "$report_file"
+    done
+    
+    # Calculate statistics
+    local total_bw=0
+    local count=0
+    local min_bw=999999
+    local max_bw=0
+    local bw_values=()
+    
+    for result in "${results[@]}"; do
+        IFS='|' read -r r_src r_dst r_bw <<< "$result"
+        if [ "$r_bw" != "0" ]; then
+            total_bw=$(echo "$total_bw + $r_bw" | bc)
+            count=$((count + 1))
+            bw_values+=("$r_bw")
+            if (( $(echo "$r_bw < $min_bw" | bc -l) )); then
+                min_bw="$r_bw"
+            fi
+            if (( $(echo "$r_bw > $max_bw" | bc -l) )); then
+                max_bw="$r_bw"
+            fi
+        fi
+    done
+    
+    # Calculate average and median
+    local avg_bw="0"
+    local median_bw="0"
+    if [ $count -gt 0 ]; then
+        avg_bw=$(echo "$total_bw / $count" | bc -l)
+        # Sort bandwidth values for median
+        IFS=$'\n' sorted_bw=($(sort -g <<< "${bw_values[*]}"))
+        unset IFS
+        local mid=$((count / 2))
+        if [ $((count % 2)) -eq 0 ]; then
+            median_bw=$(echo "(${sorted_bw[$mid-1]} + ${sorted_bw[$mid]}) / 2" | bc -l)
+        else
+            median_bw="${sorted_bw[$mid]}"
+        fi
+    fi
+    
+    # Add statistics to report
+    cat >> "$report_file" << EOF
+
+================================================================================
+                                Statistics
+================================================================================
+Total bandwidth: $(printf "%.2f" $total_bw) MB/s
+Average bandwidth: $(printf "%.2f" $avg_bw) MB/s
+Minimum bandwidth: $(printf "%.2f" $min_bw) MB/s
+Maximum bandwidth: $(printf "%.2f" $max_bw) MB/s
+Median bandwidth: $(printf "%.2f" $median_bw) MB/s
+Total test pairs: $count
+
+================================================================================
+EOF
+    
+    echo "  ✓ Matrix report generated: $report_file"
+    
+    # Append report to combined results
+    append_to_combined_result "MATRIX NETWORK TEST REPORT" "$report_file"
+}
+
 # Parse iperf3 JSON result
 parse_iperf3_result() {
     local json_file="$1"
@@ -1133,8 +1753,11 @@ parse_iperf3_result() {
         return
     fi
     
+    # Extract JSON content by removing any leading non-JSON text
+    local json_content=$(awk 'BEGIN{found=0} /^\{/{found=1} found{print} /^\}/{if(found) exit}' "$json_file" 2>/dev/null || cat "$json_file")
+    
     # Extract metrics
-    local bandwidth_bps=$(jq -r '.end.sum_received.bits_per_second // 0' "$json_file" 2>/dev/null)
+    local bandwidth_bps=$(echo "$json_content" | jq -r '.end.sum_received.bits_per_second // 0' 2>/dev/null)
     # Convert bps to MB/s: 1 MB/s = 8,000,000 bps
     local bandwidth_mbs=$(awk "BEGIN {printf \"%.2f\", $bandwidth_bps / 8000000}" 2>/dev/null || echo "0")
     
@@ -1615,57 +2238,82 @@ EOF
 
     if [ -f "$combined_file" ]; then
         # Check if network test results exist
-        if grep -q "NETWORK TEST RESULTS" "$combined_file" 2>/dev/null; then
-            # Extract all network test results for each client
+        if grep -q "NETWORK TEST RESULTS" "$combined_file" 2>/dev/null || grep -q "NETWORK MATRIX TEST RESULTS" "$combined_file" 2>/dev/null || grep -q "NETWORK PARALLEL TEST RESULTS" "$combined_file" 2>/dev/null; then
+            # Extract all network test results
             local found_results=false
 
             # Get the output directory from the combined file path
             local output_dir=$(dirname "$combined_file")
 
-            # Get all network test scenarios
-            local scenario_count=$(grep -c "NETWORK TEST RESULTS" "$combined_file")
+            # Check for different types of network test files
+            local network_files=()
+            if ls "$output_dir"/network_*.json 1>/dev/null 2>&1; then
+                network_files=($(ls "$output_dir"/network_*.json))
+            fi
 
-            # Process each scenario
-            local i=1
-            while [ $i -le $scenario_count ]; do
-                # Find the corresponding JSON file
-                local json_file="$output_dir/network_scenario_${i}.json"
-                local net_bw="0"
-                local client_ip="N/A"
+            if [ ${#network_files[@]} -gt 0 ]; then
+                # Process each network test file
+                for json_file in "${network_files[@]}"; do
+                    local net_bw="0"
+                    local client_ip="N/A"
+                    local server_ip="N/A"
 
-                if [ -f "$json_file" ]; then
-                    # Check if jq is installed
-                    if command -v jq &> /dev/null; then
-                        # Extract bandwidth from JSON file
-                        local bandwidth_bps=$(jq -r '.end.sum_received.bits_per_second // 0' "$json_file" 2>/dev/null)
-                        # Convert bps to MB/s: 1 MB/s = 8,000,000 bps
-                        net_bw=$(awk "BEGIN {printf \"%.2f\", $bandwidth_bps / 8000000}" 2>/dev/null || echo "0")
-                        
-                        # Extract client IP from the JSON file
-                        client_ip=$(jq -r '.start.client.host // "N/A"' "$json_file" 2>/dev/null)
-                        if [ -z "$client_ip" ] || [ "$client_ip" = "null" ] || [ "$client_ip" = "N/A" ]; then
-                            # Fallback: get client IP from the file name or use a generic name
-                            local scenario_idx=$(echo "$json_file" | grep -oP 'network_scenario_\K[0-9]+' | head -1)
-                            client_ip="Client $scenario_idx"
+                    if [ -f "$json_file" ]; then
+                        # Check if jq is installed
+                        if command -v jq &> /dev/null; then
+                            # Extract JSON content by removing any leading non-JSON text
+                            local json_content=$(awk 'BEGIN{found=0} /^\{/{found=1} found{print} /^\}/{if(found) exit}' "$json_file" 2>/dev/null || cat "$json_file")
+                            
+                            # Extract bandwidth from JSON content
+                            local bandwidth_bps=$(echo "$json_content" | jq -r '.end.sum_received.bits_per_second // 0' 2>/dev/null)
+                            # Convert bps to MB/s: 1 MB/s = 8,000,000 bps
+                            net_bw=$(awk "BEGIN {printf \"%.2f\", $bandwidth_bps / 8000000}" 2>/dev/null || echo "0")
+                            
+                            # Extract client and server IPs from the JSON content
+                            client_ip=$(echo "$json_content" | jq -r '.start.connected[0].local_host // "N/A"' 2>/dev/null)
+                            server_ip=$(echo "$json_content" | jq -r '.start.connected[0].remote_host // "N/A"' 2>/dev/null)
+                            
+                            if [ -z "$client_ip" ] || [ "$client_ip" = "null" ] || [ "$client_ip" = "N/A" ]; then
+                                # Fallback: get client IP from filename
+                                local file_name=$(basename "$json_file")
+                                client_ip=$(echo "$file_name" | grep -oP 'network_\w+_\K[0-9]+' | head -1)
+                                if [ -z "$client_ip" ]; then
+                                    client_ip="Client"
+                                else
+                                    client_ip="Client $client_ip"
+                                fi
+                            fi
                         fi
                     fi
-                fi
-                
-                # Display the result for this client
-                echo "  $client_ip: ${net_bw} MB/s"
-                # Write to report file
-                echo "  $client_ip: ${net_bw} MB/s" >> "$report_file"
+                    
+                    # Display the result
+                    if [ "$server_ip" != "N/A" ] && [ "$server_ip" != "null" ]; then
+                        echo "  $client_ip -> $server_ip: ${net_bw} MB/s"
+                        echo "  $client_ip -> $server_ip: ${net_bw} MB/s" >> "$report_file"
+                    else
+                        echo "  $client_ip: ${net_bw} MB/s"
+                        echo "  $client_ip: ${net_bw} MB/s" >> "$report_file"
+                    fi
+                    found_results=true
+                done
+            else
+                # No JSON files found, check combined file directly
+                echo "  Test executed but no detailed results available"
+                echo "  Test executed but no detailed results available" >> "$report_file"
                 found_results=true
-                
-                i=$((i + 1))
-            done
+            fi
             
             if [ "$found_results" = false ]; then
                 echo "  Test not executed or no results found"
+                echo "  Test not executed or no results found" >> "$report_file"
             fi
         else
             echo "  Test not executed"
+            echo "  Test not executed" >> "$report_file"
         fi
+    else
+        echo "  Test not executed"
+        echo "  Test not executed" >> "$report_file"
     fi
     
     # Add pgbench results if available
@@ -1796,6 +2444,44 @@ main() {
         fi
     fi
     
+    # Check SSH passwordless login for all target servers
+    if [ ${#target_servers[@]} -gt 0 ]; then
+        echo "=== Checking SSH Passwordless Login ==="
+        local ssh_failed=()
+        
+        for ip in "${target_servers[@]}"; do
+            # Skip local machine
+            if [ "$ip" = "$local_ip" ]; then
+                continue
+            fi
+            
+            echo -n "  Checking $ip... "
+            
+            # Test SSH connection with BatchMode=yes to avoid password prompt
+            if ssh -o BatchMode=yes -o ConnectTimeout=5 "$ip" "echo 2>/dev/null" > /dev/null 2>&1; then
+                echo "✓"
+            else
+                echo "✗"
+                ssh_failed+=($ip)
+            fi
+        done
+        
+        if [ ${#ssh_failed[@]} -gt 0 ]; then
+            echo ""
+            echo "❌ Error: SSH passwordless login not configured for the following servers:"
+            for ip in "${ssh_failed[@]}"; do
+                echo "  - $ip"
+            done
+            echo ""
+            echo "Please configure SSH passwordless login for these servers before running the test."
+            echo "You can use: ssh-copy-id $USER@<server_ip>"
+            exit 1
+        fi
+        
+        echo "✓ All servers have SSH passwordless login configured"
+        echo ""
+    fi
+    
     # Update OUTPUT_DIR environment variable
     export OUTPUT_DIR
     
@@ -1821,12 +2507,9 @@ main() {
             echo "Testing server $server_idx/$(( ${#target_servers[@]} )): $target_ip"
             echo "================================================================================"
             
-            # Only execute tests if target IP is local machine or include_local is true
-            if [ "$target_ip" = "$local_ip" ] || [ "$include_local" = "true" ]; then
-                # Here you can add remote test execution logic
-                # For example: Execute tests on remote servers via SSH
-                # Currently executing locally, can be extended to remote execution later
-                
+            # Execute tests on all servers in the list
+            if [ "$target_ip" = "$local_ip" ]; then
+                # Local machine test
                 if [ "$CPU_ENABLED" != "false" ]; then
                     run_cpu_test
                 fi
@@ -1851,7 +2534,39 @@ main() {
                     run_pgbench_test
                 fi
             else
-                echo "  Skipping local tests: local machine not in server list"
+                # Remote server test
+                echo "  Executing remote tests on $target_ip..."
+                
+                # Execute tests on remote server via SSH
+                if [ "$CPU_ENABLED" != "false" ]; then
+                    echo "  Running CPU test on $target_ip..."
+                    ssh "$target_ip" "\$HOME/sysbench/vb_benchmark cpu DURATION=\"$DURATION\" CPU_THREADS=\"$CPU_THREADS\" CPU_MAX_PRIME=\"$CPU_MAX_PRIME\""
+                fi
+                
+                if [ "$MEMORY_ENABLED" != "false" ]; then
+                    echo "  Running Memory test on $target_ip..."
+                    ssh "$target_ip" "\$HOME/sysbench/vb_benchmark memory DURATION=\"$DURATION\" MEMORY_THREADS=\"$MEMORY_THREADS\" MEMORY_BLOCK_SIZE=\"$MEMORY_BLOCK_SIZE\" MEMORY_TOTAL_SIZE=\"$MEMORY_TOTAL_SIZE\" MEMORY_OPER=\"$MEMORY_OPER\""
+                fi
+                
+                if [ "$IO_ENABLED" != "false" ]; then
+                    echo "  Running IO test on $target_ip..."
+                    ssh "$target_ip" "\$HOME/sysbench/vb_benchmark io DURATION=\"$DURATION\" IO_TOOL=\"$IO_TOOL\" IO_TOTAL_SIZE=\"$IO_TOTAL_SIZE\" IO_TEST_MODE=\"$IO_TEST_MODE\" IO_FILE_NUM=\"$IO_FILE_NUM\" IO_TEST_PATH=\"$IO_TEST_PATH\" FIO_DURATION=\"$FIO_DURATION\""
+                fi
+                
+                if [ "$THREADS_ENABLED" != "false" ]; then
+                    echo "  Running Threads test on $target_ip..."
+                    ssh "$target_ip" "\$HOME/sysbench/vb_benchmark threads DURATION=\"$DURATION\" THREADS_THREADS=\"$THREADS_THREADS\" THREADS_YIELDS=\"$THREADS_YIELDS\" THREADS_LOCKS=\"$THREADS_LOCKS\""
+                fi
+                
+                if [ "$MUTEX_ENABLED" != "false" ]; then
+                    echo "  Running Mutex test on $target_ip..."
+                    ssh "$target_ip" "\$HOME/sysbench/vb_benchmark mutex DURATION=\"$DURATION\" MUTEX_THREADS=\"$MUTEX_THREADS\" MUTEX_NUM=\"$MUTEX_NUM\""
+                fi
+                
+                if [ "$PGBENCH_ENABLED" = "true" ]; then
+                    echo "  Running pgbench test on $target_ip..."
+                    ssh "$target_ip" "\$HOME/sysbench/vb_benchmark pgbench PGBENCH_DURATION=\"$PGBENCH_DURATION\" PGBENCH_CLIENTS=\"$PGBENCH_CLIENTS\" PGBENCH_THREADS=\"$PGBENCH_THREADS\" PGBENCH_SCALE=\"$PGBENCH_SCALE\" PGBENCH_DB=\"$PGBENCH_DB\""
+                fi
             fi
         done
         
@@ -1903,6 +2618,7 @@ main() {
 install_and_distribute_sysbench() {
     local local_ip=$(get_machine_ip)
     local sysbench_dir="$HOME/sysbench"
+    local benchmark_dir=$(dirname "$(dirname "$0")")
     local need_compile=false
     
     echo "=== Sysbench Installation and Distribution ==="
@@ -1925,7 +2641,7 @@ install_and_distribute_sysbench() {
         
         # Compile sysbench if needed
         if [ "$need_compile" = "true" ]; then
-            echo "[Step 1/3] Installing dependencies and compiling sysbench on local machine..."
+            echo "[Step 1/4] Installing dependencies and compiling sysbench on local machine..."
             echo "  Local IP: $local_ip"
             echo "  Sysbench directory: $sysbench_dir"
             
@@ -1958,21 +2674,69 @@ install_and_distribute_sysbench() {
             fi
         else
             if [ -d "$sysbench_dir" ]; then
-                echo "[Step 1/3] sysbench directory exists on local machine, skipping compilation"
+                echo "[Step 1/4] sysbench directory exists on local machine, skipping compilation"
                 echo "  Local IP: $local_ip"
                 echo "  Sysbench directory: $sysbench_dir"
             else
-                echo "[Step 1/3] Skipping compilation: local machine not in server list"
+                echo "[Step 1/4] Skipping compilation: local machine not in server list"
             fi
         fi
         
-        # Distribute sysbench to other servers if it exists
+        # Copy vb_benchmark script and config files to sysbench directory
+        echo "[Step 2/4] Copying vb_benchmark script and config files..."
+        if [ -f "$benchmark_dir/vb_benchmark" ]; then
+            cp "$benchmark_dir/vb_benchmark" "$sysbench_dir/"
+            chmod +x "$sysbench_dir/vb_benchmark"
+            echo "  ✓ Copied vb_benchmark to $sysbench_dir/"
+        else
+            echo "  ✗ vb_benchmark script not found at $benchmark_dir/vb_benchmark"
+            return 1
+        fi
+        
+        if [ -f "$benchmark_dir/parameter.conf" ]; then
+            cp "$benchmark_dir/parameter.conf" "$sysbench_dir/"
+            echo "  ✓ Copied parameter.conf to $sysbench_dir/"
+            
+            # Check and create IO_TEST_PATH if specified in parameter.conf
+            local io_test_path=$(grep "^IO_TEST_PATH=" "$sysbench_dir/parameter.conf" | cut -d= -f2)
+            if [ -n "$io_test_path" ] && [ "$io_test_path" != "/tmp" ]; then
+                echo "  Checking IO_TEST_PATH: $io_test_path"
+                if [ ! -d "$io_test_path" ]; then
+                    echo "  Creating IO_TEST_PATH: $io_test_path"
+                    if mkdir -p "$io_test_path"; then
+                        echo "  ✓ Successfully created IO_TEST_PATH: $io_test_path"
+                    else
+                        echo "  ⚠ Failed to create IO_TEST_PATH: $io_test_path"
+                        echo "  Please check permissions and create the directory manually"
+                    fi
+                else
+                    echo "  ✓ IO_TEST_PATH already exists: $io_test_path"
+                fi
+            fi
+        else
+            echo "  ⚠ parameter.conf not found at $benchmark_dir/parameter.conf, skipping"
+        fi
+        
+        if [ -f "$benchmark_dir/servers.txt" ]; then
+            cp "$benchmark_dir/servers.txt" "$sysbench_dir/"
+            echo "  ✓ Copied servers.txt to $sysbench_dir/"
+        else
+            echo "  ⚠ servers.txt not found at $benchmark_dir/servers.txt, skipping"
+        fi
+        
+        # Copy tools directory if exists
+        if [ -d "$benchmark_dir/tools" ]; then
+            cp -r "$benchmark_dir/tools" "$sysbench_dir/"
+            echo "  ✓ Copied tools directory to $sysbench_dir/"
+        fi
+        
+        # Distribute to other servers if sysbench directory exists
         if [ -d "$sysbench_dir" ]; then
-            echo "[Step 2/3] Distributing sysbench to target servers..."
+            echo "[Step 3/4] Distributing to target servers..."
             echo "  Server list: ${target_servers[*]}"
             
             # Create tar package
-            local tar_file="$HOME/sysbench.tar.gz"
+            local tar_file="$HOME/vb_benchmark.tar.gz"
             echo "  Creating tar package: $tar_file"
             run_command "tar -czf $tar_file -C $HOME sysbench" "/dev/null"
             
@@ -1981,7 +2745,7 @@ install_and_distribute_sysbench() {
                 if [ "$ip" != "$local_ip" ]; then
                     echo "  Distributing to $ip..."
                     run_command "scp -q $tar_file $ip:$HOME/" "/dev/null"
-                    run_command "ssh -q $ip 'tar -xzf \$HOME/sysbench.tar.gz -C \$HOME && rm -f \$HOME/sysbench.tar.gz && echo '\''export PATH=\$PATH:\$HOME/sysbench/bin'\'' >> ~/.bashrc && source ~/.bashrc && sysbench --version'" "/dev/null"
+                    run_command "ssh -q $ip 'mkdir -p \$HOME/sysbench && tar -xzf \$HOME/vb_benchmark.tar.gz -C \$HOME && rm -f \$HOME/vb_benchmark.tar.gz && chmod +x \$HOME/sysbench/vb_benchmark && echo '\''export PATH=\$PATH:\$HOME/sysbench/bin'\'' >> ~/.bashrc && source ~/.bashrc && sysbench --version'" "/dev/null"
                     echo "  ✓ Successfully distributed to $ip"
                 fi
             done
@@ -1989,10 +2753,21 @@ install_and_distribute_sysbench() {
             # Cleanup tar file
             run_command "rm -f $tar_file" "/dev/null"
             
-            echo "  ✓ sysbench distributed to all target servers"
+            echo "  ✓ All files distributed to all target servers"
         fi
         
-        echo "[Step 3/3] Installation and distribution completed"
+        echo "[Step 4/4] Installation and distribution completed"
+        echo ""
+        echo "=== Distribution Summary ==="
+        echo "  Sysbench installed at: $sysbench_dir"
+        echo "  Scripts and configs copied:"
+        echo "    - $sysbench_dir/vb_benchmark"
+        echo "    - $sysbench_dir/parameter.conf"
+        echo "    - $sysbench_dir/servers.txt"
+        echo "  Target servers:"
+        for ip in "${target_servers[@]}"; do
+            echo "    - $ip"
+        done
     else
         # Single machine mode
         if [ ! -d "$sysbench_dir" ]; then

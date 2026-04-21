@@ -87,10 +87,47 @@ sudo apt-get install -y sysbench fio iperf3 jq
 ./vb_benchmark IO_TOOL=fio
 
 # 设置 fio 测试时长和目录
-./vb_benchmark IO_TOOL=fio IO_TEST_PATH=/data FIO_DURATION=30
+```
 
-# 网络测试
-./vb_benchmark -f "192.168.1.101 192.168.1.102"
+#### 运行特定测试（子命令）
+
+```bash
+# 运行 CPU 测试
+./vb_benchmark cpu
+
+# 运行内存测试
+./vb_benchmark mem
+
+# 运行 IO 测试
+./vb_benchmark io
+
+# 运行网络测试（矩阵模式）
+./vb_benchmark network -f servers.txt NETWORK_MODE=matrix
+
+# 运行线程测试
+./vb_benchmark thread
+
+# 运行互斥锁测试
+./vb_benchmark mutex
+
+# 运行所有测试（默认）
+./vb_benchmark all
+```
+
+#### 子命令与参数组合使用
+
+```bash
+# 运行 CPU 测试并指定参数
+./vb_benchmark cpu DURATION=20 CPU_MAX_PRIME=10000
+
+# 运行 IO 测试并使用 fio
+./vb_benchmark io IO_TOOL=fio FIO_DURATION=30
+
+# 运行网络测试并指定服务器列表
+./vb_benchmark network -f "192.168.1.101 192.168.1.102" NETWORK_MODE=parallel
+
+# 矩阵网络测试（全矩阵交叉测试）
+./vb_benchmark -f servers.txt NETWORK_MODE=matrix
 ```
 
 #### 安装 sysbench
@@ -305,6 +342,7 @@ cat output/report_benchmark_*.txt
 
 | 标签    | 日期         | 变更                                                 |
 | ----- | ---------- | -------------------------------------------------- |
+| 0.4.0 | 2026-04-21 | 重构命令行参数，添加子命令支持（cpu/mem/io/network/thread/mutex/all），优化帮助信息显示，分类展示测试参数 |
 | 0.3.0 | 2026-04-20 | 支持通过 -f 服务器IP列表控制本地机器是否参与压测，若本机器不在IP列表中则不参与压测；支持编译和scp到目标集群服务器列表 |
 | 0.2.0 | 2026-04-17 | 重构移除 lib 目录，将所有函数合并到主脚本，添加命令行参数支持及覆盖功能，更新文档为中英文双版本 |
 | 0.1.0 | 2026-04-16 | 初始版本，包含基本基准测试功能                                    |
