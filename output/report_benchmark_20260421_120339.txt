@@ -1,0 +1,93 @@
+================================================================================
+                    Database System Benchmark Report
+================================================================================
+
+Basic Information
+-----------------
+Test Time: 2026-04-21 12:04:18
+Hostname: vastbase
+CPU Cores: 4
+Memory Size: 7937 MB
+Config File: N/A
+Unified Duration: 2s
+
+================================================================================
+                           Test Configuration
+================================================================================
+
+[CPU Test]
+  Enabled: false
+  Threads: auto (4)
+  Duration: 2s
+  Max Prime: 20000
+
+[Memory Test]
+  Enabled: false
+  Block Size: 8K
+  Total Size: 20G
+  Operation: read
+  Duration: 2s
+
+[IO Test]
+  Enabled: false
+  Tool: sysbench
+  File Size: 1G
+  Test Mode: rndrw
+  Duration: 2s
+
+[Network Test]
+  Enabled: true
+  Tool: iperf3
+  Server: 172.16.53.128
+  Port: 25201
+  Duration: 2s
+  Parallel: 1
+
+[Threads Test]
+  Enabled: false
+  Threads: 1000
+  Duration: 2s
+  Yields: 100
+  Locks: 4
+
+[Mutex Test]
+  Enabled: false
+  Threads: auto (4)
+  Duration: 2s
+  Mutex Num: 1024
+
+[pgbench Test]
+  Enabled: false
+  Database: pgbench_db
+  Duration: 300s
+  Threads: auto (4)
+
+================================================================================
+                           Test Results Summary
+================================================================================
+
+[CPU Test]
+  Test not executed
+
+[Memory Test]
+  Test not executed
+
+[IO Test]
+  Test not executed
+
+[Threads Test]
+  Test not executed
+
+[Mutex Test]
+  Test not executed
+
+[Network Test]
+  172.16.54.140 -> 172.16.53.128: 108.28 MB/s
+  172.16.54.141 -> 172.16.53.128: 111.67 MB/s
+  172.16.54.142 -> 172.16.53.128: 111.39 MB/s
+
+[pgbench Test]
+
+================================================================================
+                                End of Report
+================================================================================

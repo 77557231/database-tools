@@ -4,7 +4,7 @@
 
 Basic Information
 -----------------
-Test Time: 2026-04-17 17:48:40
+Test Time: 2026-04-21 12:06:03
 Hostname: vastbase
 CPU Cores: 4
 Memory Size: 7937 MB
@@ -16,20 +16,20 @@ Unified Duration: 2s
 ================================================================================
 
 [CPU Test]
-  Enabled: true
+  Enabled: false
   Threads: auto (4)
   Duration: 2s
   Max Prime: 20000
 
 [Memory Test]
-  Enabled: true
+  Enabled: false
   Block Size: 8K
   Total Size: 20G
   Operation: read
   Duration: 2s
 
 [IO Test]
-  Enabled: true
+  Enabled: false
   Tool: sysbench
   File Size: 1G
   Test Mode: rndrw
@@ -44,14 +44,14 @@ Unified Duration: 2s
   Parallel: 1
 
 [Threads Test]
-  Enabled: true
+  Enabled: false
   Threads: 1000
   Duration: 2s
   Yields: 100
   Locks: 4
 
 [Mutex Test]
-  Enabled: true
+  Enabled: false
   Threads: auto (4)
   Duration: 2s
   Mutex Num: 1024
@@ -67,78 +67,24 @@ Unified Duration: 2s
 ================================================================================
 
 [CPU Test]
-  CPU speed:
-    events per second: 897.14
-1104.06
-456.99
-  Avg Latency:   4.44
-3.62
-8.70 ms
-  P95 Latency:   11.04
-5.88
-22.28 ms
-  Threads fairness:
-        events (avg/stddev):           449.7500/19.61
-        execution time (avg/stddev):   1.9960/0.00
+  Test not executed
 
 [Memory Test]
-  Total operations: 2621440
-2621440
-2621440 (8545225.38
-9957512.00
-5579231.73 per second)
-  Transferred:      20480.00
-20480.00
-20480.00 MiB (66759.57
-77793.06
-43587.75 MiB/sec)
-  Avg Latency:      0.00
-0.00
-0.00 ms
-  P95 Latency:      0 ms
+  Test not executed
 
 [IO Test]
-  Read IOPS:        14411.07
-17074.15
-18623.30
-  Write IOPS:       9607.38
-11382.77
-12415.53
-  Total IOPS:       14411.07
-  Read BW:          225.17
-266.78
-290.99 MB/s
-  Write BW:         150.12
-177.86
-193.99 MB/s
-  Total BW:         225.17 MB/s
-  Avg Latency:      594.71 ms
+  Test not executed
 
 [Threads Test]
-  Events/sec:     6018.00
-  Avg Latency:    354.55
-370.88
-449.63 ms
-  P95 Latency:    1069.86
-1069.86
-1376.60 ms
+  Test not executed
 
 [Mutex Test]
-  Transactions:   4
-4
-4
-  TPS:            4.00
-  Avg Latency:    225.81
-319.04
-594.71 ms
-  P95 Latency:    244.38
-350.33
-623.33 ms
+  Test not executed
 
 [Network Test]
-  Client 1: 1823.27 MB/s
-  Client 2: 1797.01 MB/s
-  Client 3: 1866.64 MB/s
+  172.16.54.140 -> 172.16.53.128: 109.43 MB/s
+  172.16.54.141 -> 172.16.53.128: 111.64 MB/s
+  172.16.54.142 -> 172.16.53.128: 110.26 MB/s
 
 [pgbench Test]
 
