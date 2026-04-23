@@ -346,13 +346,16 @@ run_command() {
     local output_file="$2"
     
     if [ "$DRY_RUN" = true ]; then
-        echo "[DRY RUN] $cmd"
+        echo "Dry run: $cmd"
         return 0
     fi
     
     if [ -n "$output_file" ]; then
+        # Execute command and capture output
         eval "$cmd" > "$output_file" 2>&1
-        return $?
+        local exit_code=$?
+        
+        return $exit_code
     else
         eval "$cmd"
         return $?
@@ -800,10 +803,8 @@ run_sysbench_fileio() {
     
     # Parse result and display detailed output
     if [ "$DRY_RUN" != true ] && [ -f "$temp_output_file" ]; then
-        # Only display parsed output in non-remote mode
-        if [ "$REMOTE" != "true" ]; then
-            parse_sysbench_fileio_result "$temp_output_file"
-        fi
+        # Display parsed output
+        parse_sysbench_fileio_result "$temp_output_file"
         
         # Append to combined results file
         append_to_combined_result "SYSBENCH FILEIO TEST RESULTS" "$temp_output_file"
@@ -1914,10 +1915,8 @@ run_threads_test() {
     
     # Parse result and display detailed output
     if [ "$DRY_RUN" != true ] && [ -f "$temp_output_file" ]; then
-        # Only display parsed output in non-remote mode
-        if [ "$REMOTE" != "true" ]; then
-            parse_threads_result "$temp_output_file"
-        fi
+        # Display parsed output
+        parse_threads_result "$temp_output_file"
         
         # Append to combined results file
         append_to_combined_result "THREADS TEST RESULTS" "$temp_output_file"
@@ -1981,10 +1980,8 @@ run_mutex_test() {
     
     # Parse result and display detailed output
     if [ "$DRY_RUN" != true ] && [ -f "$temp_output_file" ]; then
-        # Only display parsed output in non-remote mode
-        if [ "$REMOTE" != "true" ]; then
-            parse_mutex_result "$temp_output_file"
-        fi
+        # Display parsed output
+        parse_mutex_result "$temp_output_file"
         
         # Append to combined results file
         append_to_combined_result "MUTEX TEST RESULTS" "$temp_output_file"
@@ -2045,10 +2042,8 @@ run_cpu_test() {
     
     # Parse result and display detailed output
     if [ "$DRY_RUN" != true ] && [ -f "$temp_output_file" ]; then
-        # Only display parsed output in non-remote mode
-        if [ "$REMOTE" != "true" ]; then
-            parse_cpu_result "$temp_output_file"
-        fi
+        # Display parsed output
+        parse_cpu_result "$temp_output_file"
         
         # Append to combined results file
         append_to_combined_result "CPU TEST RESULTS" "$temp_output_file"
@@ -2090,10 +2085,8 @@ run_memory_test() {
     
     # Parse result and display detailed output
     if [ "$DRY_RUN" != true ] && [ -f "$temp_output_file" ]; then
-        # Only display parsed output in non-remote mode
-        if [ "$REMOTE" != "true" ]; then
-            parse_memory_result "$temp_output_file"
-        fi
+        # Display parsed output
+        parse_memory_result "$temp_output_file"
         
         # Append to combined results file
         append_to_combined_result "MEMORY TEST RESULTS" "$temp_output_file"
@@ -3143,6 +3136,7 @@ main() {
                 local remote_command="\$HOME/sysbench/vb_benchmark --remote"
                 local has_non_network_tests=false
                 
+                # Add tests to remote command based on enabled flags
                 if [ "$CPU_ENABLED" != "false" ]; then
                     remote_command="$remote_command cpu"
                     has_non_network_tests=true
@@ -3168,6 +3162,12 @@ main() {
                     has_non_network_tests=true
                 fi
                 
+                # If no tests specified, add all tests (same as local behavior)
+                if [ "$has_non_network_tests" = "false" ]; then
+                    remote_command="$remote_command all"
+                    has_non_network_tests=true
+                fi
+                
                 # Only execute remote tests if there are non-network tests to run
                 if [ "$has_non_network_tests" = true ]; then
                     # Add common parameters including TIMESTAMP
@@ -3183,7 +3183,12 @@ main() {
                     
                     # Execute the remote command and capture output to a temporary file
                     local temp_remote_file="/tmp/vb_remote_${target_ip//./_}_${TIMESTAMP}.txt"
-                    if ssh "$target_ip" "$remote_command 2>&1" > "$temp_remote_file"; then
+                    # Build the full remote command with all parameters
+                    local full_remote_command="bash -l -c '$remote_command'"
+                    if ssh "$target_ip" "$full_remote_command 2>&1" > "$temp_remote_file"; then
+                        # Display remote test output (only the summary, not the raw output)
+                        cat "$temp_remote_file"
+                        
                         # Append to the local combined file based on which tests are enabled
                         if [ "$CPU_ENABLED" != "false" ]; then
                             append_to_combined_result "CPU TEST RESULTS (Server: $target_ip)" "$temp_remote_file"
@@ -3203,7 +3208,6 @@ main() {
                         
                         # Clean up
                         rm -f "$temp_remote_file"
-                        echo "  ✓ Appended remote test results to local combined file"
                     else
                         echo "  ✗ Remote test execution failed"
                     fi
