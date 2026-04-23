@@ -233,7 +233,7 @@ show_help() {
     echo "  IO_TOTAL_SIZE=<size>        Total file size for IO test (default: 1G)"
     echo "  IO_TEST_MODE=<mode>         Test mode: rndrw|read|write (default: rndrw)"
     echo "  IO_FILE_NUM=<number>        Number of test files (default: 1)"
-    echo "  IO_TEST_PATH=<path>         Test directory path (default: /tmp)"
+    echo "  IO_TEST_PATH=<path>         Test directory path (default: \$HOME/vb_benchmark/io_test)"
     echo "  FIO_DURATION=<seconds>      fio test duration (default: same as DURATION)"
     echo ""
     echo "Network test parameters:"
@@ -720,7 +720,9 @@ run_io_test() {
 # sysbench fileio test
 run_sysbench_fileio() {
     local temp_output_file="/tmp/vb_fileio_${TIMESTAMP}.txt"
-    local test_dir="${IO_TEST_PATH:-/tmp}"
+    
+    # Use a real disk directory instead of /tmp (which may be tmpfs)
+    local test_dir="${IO_TEST_PATH:-$HOME/vb_benchmark/io_test}"
     
     # Only display test info in non-remote mode
     if [ "$REMOTE" != "true" ]; then
@@ -817,7 +819,7 @@ run_fio_test() {
 [global]
 ioengine=libaio
 direct=1
-size=${IO_FILE_SIZE:-10G}
+size=${IO_TOTAL_SIZE:-1G}
 runtime=${FIO_DURATION:-300}
 time_based
 group_reporting
@@ -827,7 +829,7 @@ rw=${rw_type}
 bs=${bs}
 iodepth=${iodepth}
 numjobs=${numjobs}
-filename=${IO_TEST_PATH:-/tmp}/fio_test_${profile}
+filename=${IO_TEST_PATH:-$HOME/vb_benchmark/io_test}/fio_test_${profile}
 EOF
         
         # Show configuration file content (also shown in dry run mode)
@@ -844,6 +846,10 @@ EOF
         
         # Cleanup temporary files (also cleanup in dry run mode)
         rm -f "$fio_conf"
+        
+        # Cleanup fio test file
+        local fio_test_file="${IO_TEST_PATH:-$HOME/vb_benchmark/io_test}/fio_test_${profile}"
+        rm -f "$fio_test_file"
         
         # Parse result
         if [ "$DRY_RUN" != true ] && [ -f "$json_output" ]; then
@@ -1033,6 +1039,7 @@ run_serial_network_test() {
     local temp_output_file="/tmp/vb_network_${TIMESTAMP}.txt"
     local temp_text_output="/tmp/vb_network_text_${TIMESTAMP}.txt"
     local iperf3_pid=""
+    local results=()
     
     # Check if multiple client IPs are configured (space-separated)
     local client_ips=($client_ip)
@@ -1113,7 +1120,11 @@ run_serial_network_test() {
                 run_command "ssh $client 'iperf3 -c "$server_ip" -p "$port" -t "$duration" -P "$parallel" 2>&1 | grep -v \"^$\"'" "$client_text_output"
                 
                 # Parse and display result
+                local bandwidth=$(parse_iperf3_matrix_result "$client_output_file")
                 parse_iperf3_result "$client_output_file"
+                
+                # Add result to results array
+                results+=("$client|$server_ip|$bandwidth")
                 
                 # Display per-second throughput
                 display_per_second_throughput "$client_text_output" "$server_ip (from $client)"
@@ -1131,8 +1142,17 @@ run_serial_network_test() {
         # Keep the files for report generation
     done
     
-    echo ""    
-echo "✓ Network test completed for all clients"    
+    echo ""
+    echo "✓ Network test completed for all clients"
+    
+    # Output summary of results to terminal
+    if [ ${#results[@]} -gt 0 ]; then
+        echo ""
+        for result in "${results[@]}"; do
+            IFS='|' read -r src dst bw <<< "$result"
+            echo "- $src -> $dst = ${bw} MB/s"
+        done
+    fi
     
     # Stop iperf3 server    
 echo "  Stopping iperf3 server..."    
@@ -1468,6 +1488,15 @@ run_matrix_network_test() {
     # Generate matrix report
     generate_matrix_report "${results[@]}" "${host_ips[@]}"
     
+    # Output summary of results to terminal
+    if [ ${#results[@]} -gt 0 ]; then
+        echo ""
+        for result in "${results[@]}"; do
+            IFS='|' read -r src dst bw <<< "$result"
+            echo "- $src -> $dst = ${bw} MB/s"
+        done
+    fi
+    
     echo ""
     echo "✓ Matrix network test completed"
 }
@@ -1574,6 +1603,15 @@ run_parallel_network_test() {
     
     # Generate parallel test report
     generate_parallel_report "${results[@]}" "$server_ip"
+    
+    # Output summary of results to terminal
+    if [ ${#results[@]} -gt 0 ]; then
+        echo ""
+        for result in "${results[@]}"; do
+            IFS='|' read -r src dst bw <<< "$result"
+            echo "- $src -> $dst = ${bw} MB/s"
+        done
+    fi
     
     echo ""
     echo "✓ Parallel network test completed"
@@ -3104,8 +3142,16 @@ main() {
                 
                 # If no tests specified, add all tests (same as local behavior)
                 if [ "$has_non_network_tests" = "false" ]; then
-                    remote_command="$remote_command all"
-                    has_non_network_tests=true
+                    # Check if only network test is requested
+                    if [ "$NETWORK_ENABLED" = "true" ] && [ "$CPU_ENABLED" != "true" ] && [ "$MEMORY_ENABLED" != "true" ] && [ "$IO_ENABLED" != "true" ] && [ "$THREADS_ENABLED" != "true" ] && [ "$MUTEX_ENABLED" != "true" ]; then
+                        # Only network test requested, skip remote tests
+                        echo "  Skipping remote tests (only network test requested)"
+                        continue
+                    else
+                        # No tests specified, add all tests
+                        remote_command="$remote_command all"
+                        has_non_network_tests=true
+                    fi
                 fi
                 
                 # Only execute remote tests if there are non-network tests to run

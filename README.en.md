@@ -194,6 +194,68 @@ cat output/report_benchmark_*.txt
 - **Bandwidth**: Throughput in MB/s (higher is better)
 - **Latency**: Latency (lower is better)
 
+### IO Benchmark Details
+
+#### Sysbench fileio Workflow
+
+Sysbench fileio testing consists of three phases:
+
+1. **prepare phase**: Create test files
+   - Creates test files in the directory specified by `IO_TEST_PATH`
+   - Default file size is 1G (adjustable via `IO_TOTAL_SIZE`)
+   - Default number of files is 1 (adjustable via `IO_FILE_NUM`)
+
+2. **run phase**: Execute actual benchmark
+   - The `DURATION` parameter only controls the execution time of this phase
+   - Performs random read/write operations on files created in prepare phase
+   - Default test mode is `rndrw` (random read/write), adjustable via `IO_TEST_MODE`
+
+3. **cleanup phase**: Automatically clean up test files
+   - Deletes all test files created in prepare phase
+   - The test directory itself is not deleted
+
+#### FIO Workflow
+
+FIO testing works differently:
+
+1. **Configuration generation**: Generates `.fio` configuration file based on parameters
+2. **Execute test**: FIO automatically creates test files during runtime
+3. **File handling**: FIO does not automatically delete files after testing; the script retains result files
+
+#### Important Notes
+
+**IO_TEST_PATH Parameter**:
+
+- Default test path is `$HOME/vb_benchmark/io_test`
+- **Do NOT use `/tmp` directory**: On some servers, `/tmp` is tmpfs (memory filesystem), which leads to inaccurate test results (testing memory instead of disk)
+- It is recommended to use the disk partition where the database data directory is located for more reference value
+- Ensure the target partition has enough available space (at least larger than `IO_TOTAL_SIZE`)
+
+**Common Parameters**:
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `IO_TEST_PATH` | `$HOME/vb_benchmark/io_test` | Test file directory |
+| `IO_TOTAL_SIZE` | `1G` | Total test file size (shared by sysbench and fio) |
+| `IO_TEST_MODE` | `rndrw` | Test mode (seqwr/seqrd/rndwr/rndrd/rndrw) |
+| `IO_FILE_NUM` | `1` | Number of test files |
+| `IO_TOOL` | `sysbench` | IO testing tool (sysbench/fio) |
+| `IO_DURATION` | `DURATION` | Sysbench IO test duration |
+| `FIO_DURATION` | `300` | FIO test duration |
+
+**Examples**:
+
+```bash
+# Random read/write test with sysbench
+./vb_benchmark io DURATION=60 IO_TOTAL_SIZE=2G
+
+# Sequential read test with fio
+./vb_benchmark io IO_TOOL=fio IO_TEST_MODE=read FIO_DURATION=60
+
+# Specify test path to database data directory
+./vb_benchmark io IO_TEST_PATH=/data/vastbase/pg_xlog
+```
+
 ### Network Test
 - **Bandwidth**: Network bandwidth in MB/s (higher is better)
 
