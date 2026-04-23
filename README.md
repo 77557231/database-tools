@@ -4,20 +4,20 @@
 
 ## 特性
 
-- ✅ **统一配置**：通过单一配置文件控制所有测试参数
-- ✅ **一键执行**：自动化完成 CPU/内存/IO/网络/线程/锁测试
-- ✅ **灵活扩展**：支持命令行参数覆盖配置文件设置
-- ✅ **最小依赖**：基础模式仅需 sysbench
-- ✅ **多工具支持**：IO 测试支持 sysbench 和 fio
-- ✅ **多服务器支持**：网络压测支持多 IP 配置（需 SSH 免密）
-- ✅ **详细报告**：生成结构化测试报告
+- ✅ **一键执行**：自动化完成 CPU/内存/IO/网络/线程/锁测试，无需手动配置
+- ✅ **最小依赖**：基础模式仅需 sysbench，其他工具（fio、iperf3）为可选
+- ✅ **多工具支持**：IO 测试支持 sysbench 和 fio，可根据需要选择
+- ✅ **多服务器支持**：网络压测支持多 IP 配置（需 SSH 免密），可测试集群网络性能
+- ✅ **详细报告**：生成结构化测试报告，包含系统信息、测试配置和详细指标
+- ✅ **远程分发**：自动编译和分发 sysbench 到远程服务器，降低额外安装影响
+- ✅ **多种网络模式**：支持串行、并行和矩阵网络测试模式
+- ✅ **结果分析**：生成多服务器对比报告，便于性能分析和问题定位
 
 ## 项目结构
 
 ```
 vb_benchmark/
 ├── vb_benchmark              # 主入口脚本
-├── parameter.conf            # 统一参数配置文件
 ├── output/                   # 测试结果输出目录
 ├── tools/
 │   └── skill.md              # 开发规范文档
@@ -63,14 +63,6 @@ sudo apt-get install -y sysbench fio iperf3 jq
 ./vb_benchmark
 ```
 
-#### 使用配置文件
-
-```bash
-./vb_benchmark -c parameter.conf
-# 或使用完整路径
-./vb_benchmark -c path/parameter.conf
-```
-
 #### 命令行参数覆盖
 
 ```bash
@@ -110,6 +102,9 @@ sudo apt-get install -y sysbench fio iperf3 jq
 # 运行互斥锁测试
 ./vb_benchmark mutex
 
+# 运行系统检查（依赖项、权限、磁盘空间、网络）
+./vb_benchmark check
+
 # 运行所有测试（默认）
 ./vb_benchmark all
 ```
@@ -128,9 +123,26 @@ sudo apt-get install -y sysbench fio iperf3 jq
 
 # 矩阵网络测试（全矩阵交叉测试）
 ./vb_benchmark -f servers.txt NETWORK_MODE=matrix
+
+# 高级用法
+# 运行系统检查并指定测试目录
+./vb_benchmark -f servers.txt check IO_TEST_PATH='/home/vastbase/vb_test'
+# 同时运行多个测试并指定参数
+./vb_benchmark cpu mem -f servers.txt DURATION=2 THREADS=4
+# 运行 IO 测试并使用 fio 工具和自定义参数
+./vb_benchmark io -f servers.txt IO_TOOL=fio IO_TEST_MODE=read IO_TOTAL_SIZE=10G
 ```
 
 #### 安装 sysbench
+
+本工具支持自动编译和分发 sysbench 到远程服务器，降低最小额外安装影响。
+
+**本机编译拷贝远程服务器方式**：
+1. **自动编译**：如果本机没有 `$HOME/sysbench` 目录，会自动下载并编译 sysbench
+2. **打包分发**：将编译好的 sysbench 打包并通过 SCP 分发到远程服务器
+3. **最小影响**：无需在远程服务器上安装编译依赖，只需 SSH 免密登录即可
+
+**安装命令**：
 
 单机安装：
 ```bash
@@ -156,6 +168,16 @@ sudo apt-get install -y sysbench fio iperf3 jq
 | 本机不在 IP 列表中 | 所有服务器都需要分发（从本地已有目录） |
 | SCP 分发 | 自动排除本机器 IP |
 
+**执行方式**：
+- **本地执行**：直接使用当前目录下的 `vb_benchmark` 脚本
+- **远程执行**：通过 SSH 调用远程服务器上的 `$HOME/sysbench/vb_benchmark` 脚本
+
+**优势**：
+- 无需在远程服务器上安装编译工具和依赖
+- 统一的 sysbench 版本，确保测试结果的一致性
+- 降低对远程服务器的影响，无需修改系统配置
+- 自动配置环境变量，使用方便
+
 **注意事项**：
 - `$HOME/sysbench` 目录会自动创建，若已存在则跳过编译过程
 - 多机器安装时，若本机在 IP 列表中且没有 `$HOME/sysbench` 目录，会先编译再分发
@@ -176,87 +198,7 @@ ls -lh output/
 cat output/report_benchmark_*.txt
 ```
 
-## 配置说明
 
-### 统一配置文件
-
-项目使用单一配置文件 `config/parameter.conf` 控制所有测试参数。配置文件包含详细的英文注释。
-
-### 详细参数说明
-
-#### 核心参数
-
-| 参数          | 说明        | 默认值      | 示例           |
-| ----------- | --------- | -------- | ------------ |
-| DURATION    | 统一测试时长（秒） | 10       | 60           |
-| OUTPUT\_DIR | 输出目录路径    | ./output | /var/results |
-| CLEANUP     | 测试后清理临时文件 | true     | true/false   |
-
-#### CPU 测试参数
-
-| 参数              | 说明              | 默认值   | 示例         |
-| --------------- | --------------- | ----- | ---------- |
-| CPU\_ENABLED    | 是否启用 CPU 测试     | true  | true/false |
-| CPU\_THREADS    | CPU 测试线程数（0=自动） | 0     | 8          |
-| CPU\_MAX\_PRIME | CPU 测试最大素数      | 20000 | 10000      |
-
-#### 内存测试参数
-
-| 参数                  | 说明            | 默认值  | 示例         |
-| ------------------- | ------------- | ---- | ---------- |
-| MEMORY\_ENABLED     | 是否启用内存测试      | true | true/false |
-| MEMORY\_THREADS     | 内存测试线程数（0=自动） | 0    | 8          |
-| MEMORY\_BLOCK\_SIZE | 块大小           | 8K   | 4K/8K/16K  |
-| MEMORY\_TOTAL\_SIZE | 总测试大小         | 20G  | 10G/20G    |
-| MEMORY\_OPER        | 内存操作类型        | read | read/write |
-
-#### IO 测试参数
-
-| 参数              | 说明          | 默认值        | 示例               |
-| --------------- | ----------- | ---------- | ---------------- |
-| IO\_ENABLED     | 是否启用 IO 测试  | true       | true/false       |
-| IO\_TOOL        | IO 测试工具     | sysbench   | sysbench/fio     |
-| IO\_TOTAL\_SIZE | IO 测试文件总大小  | 1G         | 1G/10G           |
-| IO\_TEST\_MODE  | 测试模式        | rndrw      | rndrw/read/write |
-| IO\_FILE\_NUM   | 测试文件数量      | 1          | 4                |
-| IO\_TEST\_PATH  | 测试目录路径      | /tmp       | /data            |
-| FIO\_DURATION   | fio 测试时长（秒） | 同 DURATION | 30               |
-
-#### 网络测试参数
-
-| 参数                  | 说明                   | 默认值   | 示例                            |
-| ------------------- | -------------------- | ----- | ----------------------------- |
-| NETWORK\_ENABLED    | 是否启用网络测试             | false | true/false                    |
-| NETWORK\_SERVER\_IP | 服务器 IP（空值自动检测）       | ""    | "192.168.1.100"               |
-| NETWORK\_CLIENT\_IP | 客户端 IP（支持多个 IP 空格分隔） | ""    | "192.168.1.101 192.168.1.102" |
-| NETWORK\_PORT       | 测试端口                 | 25201 | 5201                          |
-| NETWORK\_PARALLEL   | 并行连接数                | 1     | 4                             |
-
-#### 线程测试参数
-
-| 参数               | 说明           | 默认值  | 示例         |
-| ---------------- | ------------ | ---- | ---------- |
-| THREADS\_ENABLED | 是否启用线程测试     | true | true/false |
-| THREADS\_NUM     | 线程数          | 1000 | 1000       |
-| THREADS\_YIELDS  | 每线程 yield 次数 | 100  | 100        |
-| THREADS\_LOCKS   | 锁数量          | 4    | 4          |
-
-#### 互斥锁测试参数
-
-| 参数             | 说明             | 默认值  | 示例         |
-| -------------- | -------------- | ---- | ---------- |
-| MUTEX\_ENABLED | 是否启用互斥锁测试      | true | true/false |
-| MUTEX\_THREADS | 互斥锁测试线程数（0=自动） | 0    | 8          |
-| MUTEX\_NUM     | 互斥锁数量          | 1024 | 1024       |
-
-#### pgbench 测试参数
-
-| 参数                | 说明                | 默认值         | 示例         |
-| ----------------- | ----------------- | ----------- | ---------- |
-| PGBENCH\_ENABLED  | 是否启用 pgbench 测试   | false       | true/false |
-| PGBENCH\_DB       | pgbench 数据库名      | pgbench\_db | mydb       |
-| PGBENCH\_THREADS  | pgbench 线程数（0=自动） | 0           | 8          |
-| PGBENCH\_DURATION | pgbench 测试时长（秒）   | 300         | 300        |
 
 ## 输出指标说明
 
@@ -323,6 +265,31 @@ cat output/report_benchmark_*.txt
 
 ### Q4: 网络测试如何配置多客户端？
 
+**A**: 创建服务器列表文件 `servers.txt`，包含所有需要测试的 IP 地址，然后使用 `-f` 参数指定：
+
+```bash
+./vb_benchmark network -f servers.txt
+```
+
+### Q5: NETWORK_MODE 和 NETWORK_PARALLEL 参数的区别是什么？
+
+**A**:
+- **NETWORK_MODE**：控制多个客户端测试的执行方式
+  - `serial`：逐个执行客户端测试，一个完成后再开始下一个
+  - `parallel`：同时执行所有客户端测试
+  - `matrix`：执行全矩阵交叉测试（每对服务器之间都进行测试）
+
+- **NETWORK_PARALLEL**：控制每个 iperf3 测试的并行连接数，在所有模式下都生效
+  - 例如：`NETWORK_PARALLEL=4` 表示每个测试使用 4 个并行连接
+
+**示例**：
+```bash
+# 串行执行，每个测试使用 4 个并行连接
+./vb_benchmark network -f servers.txt NETWORK_MODE=serial NETWORK_PARALLEL=4
+
+# 并行执行，每个测试使用 4 个并行连接
+./vb_benchmark network -f servers.txt NETWORK_MODE=parallel NETWORK_PARALLEL=4
+```
 
 ## 最佳实践
 
@@ -342,6 +309,7 @@ cat output/report_benchmark_*.txt
 
 | 标签    | 日期         | 变更                                                 |
 | ----- | ---------- | -------------------------------------------------- |
+| 0.5.0 | 2026-04-21 | 修复远程执行路径问题，添加 SSH 免密登录检查，改进 IO 测试路径管理，支持任意服务器列表文件分发，添加 check 命令支持，优化检查输出详细信息，支持多子命令同时执行，分离检查和压测逻辑，添加 DEBUG 模式 |
 | 0.4.0 | 2026-04-21 | 重构命令行参数，添加子命令支持（cpu/mem/io/network/thread/mutex/all），优化帮助信息显示，分类展示测试参数 |
 | 0.3.0 | 2026-04-20 | 支持通过 -f 服务器IP列表控制本地机器是否参与压测，若本机器不在IP列表中则不参与压测；支持编译和scp到目标集群服务器列表 |
 | 0.2.0 | 2026-04-17 | 重构移除 lib 目录，将所有函数合并到主脚本，添加命令行参数支持及覆盖功能，更新文档为中英文双版本 |
@@ -349,6 +317,5 @@ cat output/report_benchmark_*.txt
 
 ***
 
-**版本**: v2.0.0
 **创建日期**: 2026-04-17
 **维护团队**: Vastbase 二线团队

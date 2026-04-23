@@ -4,9 +4,8 @@ A system-level performance benchmarking tool designed for Vastbase, openGauss, a
 
 ## Features
 
-- ✅ **Unified Configuration**: Control all test parameters through a single configuration file
 - ✅ **One-Click Execution**: Automated CPU/Memory/IO/Network/Threads/Mutex testing
-- ✅ **Flexible Override**: Support command line parameters to override configuration file settings
+- ✅ **Flexible Parameters**: Control all test parameters through command line arguments
 - ✅ **Minimal Dependencies**: Basic mode only requires sysbench
 - ✅ **Multi-Tool Support**: IO testing supports both sysbench and fio
 - ✅ **Multi-Server Support**: Network testing supports multiple IP configurations (requires SSH passwordless login)
@@ -17,7 +16,6 @@ A system-level performance benchmarking tool designed for Vastbase, openGauss, a
 ```
 vb_benchmark/
 ├── vb_benchmark              # Main entry script
-├── parameter.conf            # Unified parameter configuration
 ├── output/                   # Test results output directory
 ├── tools/
 │   └── skill.md              # Development documentation
@@ -60,12 +58,7 @@ sudo apt-get install -y sysbench fio iperf3 jq
 ./vb_benchmark
 ```
 
-#### Using Configuration File
-```bash
-./vb_benchmark -c parameter.conf
-# Or use full path
-./vb_benchmark -c path/parameter.conf
-```
+
 
 #### Command line parameter override
 
@@ -106,6 +99,9 @@ sudo apt-get install -y sysbench fio iperf3 jq
 # Run mutex test
 ./vb_benchmark mutex
 
+# Run system checks (dependencies, permissions, disk space, network)
+./vb_benchmark check
+
 # Run all tests (default)
 ./vb_benchmark all
 ```
@@ -124,6 +120,14 @@ sudo apt-get install -y sysbench fio iperf3 jq
 
 # Matrix network test (all-to-all cross testing)
 ./vb_benchmark -f servers.txt NETWORK_MODE=matrix
+
+# Advanced usage
+# Run system checks with custom test directory
+./vb_benchmark -f servers.txt check IO_TEST_PATH='/home/vastbase/vb_test'
+# Run multiple tests with custom parameters
+./vb_benchmark cpu mem -f servers.txt DURATION=2 THREADS=4
+# Run IO test with fio and custom parameters
+./vb_benchmark io -f servers.txt IO_TOOL=fio IO_TEST_MODE=read IO_TOTAL_SIZE=10G
 ```
 
 #### Install sysbench
@@ -152,6 +156,10 @@ Multi-machine installation (direct IP list):
 | Local machine not in IP list | All servers need distribution (from local existing directory) |
 | SCP distribution | Automatically exclude local machine IP |
 
+**Execution Method**:
+- **Local Execution**: Directly use the `vb_benchmark` script in the current directory
+- **Remote Execution**: Call the `$HOME/sysbench/vb_benchmark` script on remote servers via SSH
+
 **Notes**:
 - `$HOME/sysbench` directory will be created automatically, skip compilation if it already exists
 - For multi-machine installation, if local machine is in the IP list and no `$HOME/sysbench` directory exists, it will compile first then distribute
@@ -163,92 +171,11 @@ Multi-machine installation (direct IP list):
 ```bash
 ./vb_benchmark -d
 ```
-
 ### 4. View Reports
 ```bash
 ls -lh output/
 cat output/report_benchmark_*.txt
 ```
-
-## Configuration
-
-### Unified Configuration File
-
-The project uses a single configuration file `config/parameter.conf` to control all test parameters. The configuration file contains detailed English comments.
-
-### Detailed Parameter Description
-
-#### Core Parameters
-
-| Parameter | Description | Default | Example |
-|-----------|-------------|---------|---------|
-| DURATION | Unified test duration (seconds) | 10 | 60 |
-| OUTPUT_DIR | Output directory path | ./output | /var/results |
-| CLEANUP | Cleanup temp files after test | true | true/false |
-
-#### CPU Test Parameters
-
-| Parameter | Description | Default | Example |
-|-----------|-------------|---------|---------|
-| CPU_ENABLED | Enable CPU test | true | true/false |
-| CPU_THREADS | CPU test threads, 0=auto | 0 | 8 |
-| CPU_MAX_PRIME | Max prime number for CPU test | 20000 | 10000 |
-
-#### Memory Test Parameters
-
-| Parameter | Description | Default | Example |
-|-----------|-------------|---------|---------|
-| MEMORY_ENABLED | Enable Memory test | true | true/false |
-| MEMORY_THREADS | Memory test threads, 0=auto | 0 | 8 |
-| MEMORY_BLOCK_SIZE | Block size | 8K | 4K/8K/16K |
-| MEMORY_TOTAL_SIZE | Total test size | 20G | 10G/20G |
-| MEMORY_OPER | Memory operation type | read | read/write |
-
-#### IO Test Parameters
-
-| Parameter | Description | Default | Example |
-|-----------|-------------|---------|---------|
-| IO_ENABLED | Enable IO test | true | true/false |
-| IO_TOOL | IO test tool | sysbench | sysbench/fio |
-| IO_TOTAL_SIZE | IO test file total size | 1G | 1G/10G |
-| IO_TEST_MODE | Test mode | rndrw | rndrw/read/write |
-| IO_FILE_NUM | Number of test files | 1 | 4 |
-| IO_TEST_PATH | Test directory path | /tmp | /data |
-| FIO_DURATION | fio test duration (seconds) | same as DURATION | 30 |
-
-#### Network Test Parameters
-
-| Parameter | Description | Default | Example |
-|-----------|-------------|---------|---------|
-| NETWORK_ENABLED | Enable Network test | false | true/false |
-| NETWORK_PORT | Test port | 25201 | 5201 |
-| NETWORK_PARALLEL | Parallel connections | 1 | 4 |
-
-#### Threads Test Parameters
-
-| Parameter | Description | Default | Example |
-|-----------|-------------|---------|---------|
-| THREADS_ENABLED | Enable Threads test | true | true/false |
-| THREADS_NUM | Number of threads | 1000 | 1000 |
-| THREADS_YIELDS | Yield count per thread | 100 | 100 |
-| THREADS_LOCKS | Number of locks | 4 | 4 |
-
-#### Mutex Test Parameters
-
-| Parameter | Description | Default | Example |
-|-----------|-------------|---------|---------|
-| MUTEX_ENABLED | Enable Mutex test | true | true/false |
-| MUTEX_THREADS | Mutex test threads, 0=auto | 0 | 8 |
-| MUTEX_NUM | Number of mutexes | 1024 | 1024 |
-
-#### pgbench Test Parameters
-
-| Parameter | Description | Default | Example |
-|-----------|-------------|---------|---------|
-| PGBENCH_ENABLED | Enable pgbench test | false | true/false |
-| PGBENCH_DB | pgbench database name | pgbench_db | mydb |
-| PGBENCH_THREADS | pgbench threads, 0=auto | 0 | 8 |
-| PGBENCH_DURATION | pgbench test duration (seconds) | 300 | 300 |
 
 ## Output Metrics
 
@@ -305,6 +232,32 @@ The project uses a single configuration file `config/parameter.conf` to control 
 
 ### Q4: How to configure multi-client for network testing?
 
+**A**: Create a server list file `servers.txt` containing all IP addresses to test, then specify it with the `-f` parameter:
+
+```bash
+./vb_benchmark network -f servers.txt
+```
+
+### Q5: What is the difference between NETWORK_MODE and NETWORK_PARALLEL parameters?
+
+**A**:
+- **NETWORK_MODE**: Controls how multiple client tests are executed
+  - `serial`: Execute client tests one by one, starting the next after the previous completes
+  - `parallel`: Execute all client tests simultaneously
+  - `matrix`: Execute full matrix cross-testing (test between every pair of servers)
+
+- **NETWORK_PARALLEL**: Controls the number of parallel connections for each iperf3 test, effective in all modes
+  - Example: `NETWORK_PARALLEL=4` means each test uses 4 parallel connections
+
+**Examples**:
+```bash
+# Serial execution, each test uses 4 parallel connections
+./vb_benchmark network -f servers.txt NETWORK_MODE=serial NETWORK_PARALLEL=4
+
+# Parallel execution, each test uses 4 parallel connections
+./vb_benchmark network -f servers.txt NETWORK_MODE=parallel NETWORK_PARALLEL=4
+```
+
 ## Best Practices
 
 1. **Test Environment**: Run in an isolated test environment to avoid impacting production business
@@ -323,6 +276,7 @@ This project is licensed under the GNU General Public License v3.0.
 
 | Tag | Date | Changes |
 |-----|------|---------|
+| 0.5.0 | 2026-04-21 | Fixed remote execution path issue, added SSH passwordless login check, improved IO test path management, supported distribution to arbitrary server list files, added check command support, optimized check output with detailed information, supported multiple subcommands execution, separated check and test logic, added DEBUG mode |
 | 0.4.0 | 2026-04-21 | Refactored command line parameters, added subcommand support (cpu/mem/io/network/thread/mutex/all), optimized help information display, categorized test parameters |
 | 0.3.0 | 2026-04-20 | Added support for controlling whether local machine participates in testing through -f server IP list, local machine will not participate if not in IP list; Added support for compiling and distributing sysbench to target cluster server list |
 | 0.2.0 | 2026-04-17 | Refactored to remove lib directory, merged all functions into main script, added command line parameter support with override capability, updated documentation to English |
@@ -330,6 +284,5 @@ This project is licensed under the GNU General Public License v3.0.
 
 ---
 
-**Version**: v2.0.0
 **Created**: 2026-04-17
 **Maintained by**: Vastbase L2 Support Team
