@@ -15,6 +15,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CONFIG_FILE=""
 OUTPUT_DIR="./output"
 DRY_RUN=false
+NO_CHECKS=false
 
 # Trap Ctrl+C (SIGINT) to clean up processes
 trap cleanup SIGINT
@@ -184,6 +185,8 @@ parse_args() {
             local key="${BASH_REMATCH[1]}"
             local value="${BASH_REMATCH[2]}"
             export "$key"="$value"
+        elif [ "$arg" = "NO_CHECKS=true" ]; then
+            NO_CHECKS=true
         fi
     done
 }
@@ -424,6 +427,10 @@ parse_test_scenarios() {
 
 # Check all dependencies
 check_all() {
+    if [ "$NO_CHECKS" = "true" ]; then
+        return
+    fi
+    
     echo "Checking system prerequisites..."
     echo "--------------------------------"
     
@@ -656,10 +663,13 @@ append_to_original() {
     local result_file="$2"
     local original_file="$OUTPUT_DIR/original_data_${TIMESTAMP}_all_results.log"
     
+    # Get local machine IP
+    local local_ip=$(get_machine_ip)
+    
     # Append to original data file for traceability (only raw test output)
     echo "" >> "$original_file"
     echo "================================================================================" >> "$original_file"
-    echo "$section_title (ORIGINAL OUTPUT)" >> "$original_file"
+    echo "$section_title (Server: $local_ip) (ORIGINAL OUTPUT)" >> "$original_file"
     echo "================================================================================" >> "$original_file"
     if [ -f "$result_file" ]; then
         # For sysbench tests, extract only the raw test output
@@ -2222,9 +2232,9 @@ generate_report() {
     # Parse CPU results from combined file
     if [ -f "$combined_file" ]; then
         # Check if CPU test results exist
-        if grep -q "CPU TEST RESULTS" "$combined_file" 2>/dev/null; then
+        if grep -q "CPU test summary:" "$combined_file" 2>/dev/null; then
             # Count CPU test sections (one per server)
-            local cpu_section_count=$(grep -c "CPU TEST RESULTS" "$combined_file" 2>/dev/null)
+            local cpu_section_count=$(grep -c "CPU test summary:" "$combined_file" 2>/dev/null)
             
             if [ "$cpu_section_count" -gt 1 ]; then
                 # Multiple servers - show comparison table
@@ -2233,56 +2243,29 @@ generate_report() {
                 printf "  %-20s %-15s %-15s %-15s\n" "Server IP" "Events/sec" "Avg Latency (ms)" "P95 Latency (ms)" >> "$report_file"
                 echo "  --------------------------------------" >> "$report_file"
                 
-                local server_idx=0
-                local in_cpu_section=false
-                local current_server_ip=""
-                local current_events=""
-                local current_avg_lat=""
-                local current_p95_lat=""
+                # Extract server IPs
+                local server_ips=($(grep -oP "Testing server [0-9]+/[0-9]+: \K[0-9.]+" "$combined_file"))
                 
-                while IFS= read -r line; do
-                    if [[ "$line" =~ "CPU TEST RESULTS" ]]; then
-                        # Start of new server section
-                        if [ "$in_cpu_section" = true ] && [ -n "$current_server_ip" ]; then
-                            # Process previous server results
-                            printf "  %-20s %-15s %-15s %-15s\n" "$current_server_ip" "${current_events:-N/A}" "${current_avg_lat:-N/A}" "${current_p95_lat:-N/A}" >> "$report_file"
-                        fi
-                        in_cpu_section=true
-                        # Extract server IP from the line
-                        current_server_ip=$(echo "$line" | grep -oP 'Server: \K[0-9.]+' || hostname -I | awk '{print $1}')
-                        server_idx=$((server_idx + 1))
-                        current_events=""
-                        current_avg_lat=""
-                        current_p95_lat=""
-                    elif [ "$in_cpu_section" = true ]; then
-                        # Extract key metrics from both parsed output and raw sysbench output
-                        if [[ "$line" =~ "events per second" ]]; then
-                            current_events=$(echo "$line" | awk '{print $NF}')
-                        elif [[ "$line" =~ "Avg Latency:" ]]; then
-                            current_avg_lat=$(echo "$line" | awk '{print $NF}')
-                        elif [[ "$line" =~ "P95 Latency:" ]]; then
-                            current_p95_lat=$(echo "$line" | awk '{print $NF}')
-                        # Extract from raw sysbench output
-                        elif [[ "$line" =~ "avg:" ]]; then
-                            current_avg_lat=$(echo "$line" | awk '{print $NF}' | tr -d ',')
-                        elif [[ "$line" =~ "95th percentile" ]]; then
-                            current_p95_lat=$(echo "$line" | awk '{print $NF}')
-                        fi
-                    fi
-                done < "$combined_file"
+                # Extract events per second
+                local events=($(grep -A2 "CPU test summary:" "$combined_file" | grep "events per second:" | awk '{print $NF}'))
                 
-                # Process last server results
-                if [ "$in_cpu_section" = true ] && [ -n "$current_server_ip" ]; then
-                    printf "  %-20s %-15s %-15s %-15s\n" "$current_server_ip" "${current_events:-N/A}" "${current_avg_lat:-N/A}" "${current_p95_lat:-N/A}" >> "$report_file"
-                fi
+                # Extract avg latency
+                local avg_lat=($(grep -A3 "CPU test summary:" "$combined_file" | grep "Avg Latency:" | awk '{print $NF}' | sed 's/ms//'))
+                
+                # Extract p95 latency
+                local p95_lat=($(grep -A4 "CPU test summary:" "$combined_file" | grep "P95 Latency:" | awk '{print $NF}' | sed 's/ms//'))
+                
+                # Print the comparison table
+                for ((i=0; i<${#server_ips[@]}; i++)); do
+                    printf "  %-20s %-15s %-15s %-15s\n" "${server_ips[$i]}" "${events[$i]:-N/A}" "${avg_lat[$i]:-N/A}" "${p95_lat[$i]:-N/A}" >> "$report_file"
+                done
             else
                 # Single server - show results directly
-                local cpu_events=$(grep -A1 "CPU speed:" "$combined_file" 2>/dev/null | grep "events per second" | awk '{print $NF}')
-                local cpu_avg_lat=$(grep -A30 "CPU TEST RESULTS" "$combined_file" 2>/dev/null | grep -A5 "Latency (ms):" | grep "avg:" | awk '{print $NF}')
-                local cpu_p95_lat=$(grep -A30 "CPU TEST RESULTS" "$combined_file" 2>/dev/null | grep "95th percentile" | awk '{print $NF}')
-                local cpu_p99_lat=$(grep -A30 "CPU TEST RESULTS" "$combined_file" 2>/dev/null | grep "99th percentile" | awk '{print $NF}')
-                local cpu_threads_fairness_events=$(grep -A50 "CPU TEST RESULTS" "$combined_file" 2>/dev/null | grep "Threads fairness:" -A2 | grep "events" | head -1)
-                local cpu_threads_fairness_time=$(grep -A50 "CPU TEST RESULTS" "$combined_file" 2>/dev/null | grep "Threads fairness:" -A2 | grep "execution time" | head -1)
+                local cpu_events=$(grep -A3 "CPU test summary:" "$combined_file" 2>/dev/null | grep "events per second:" | awk '{print $NF}')
+                local cpu_avg_lat=$(grep -A5 "CPU test summary:" "$combined_file" 2>/dev/null | grep "Avg Latency:" | awk '{print $NF}' | sed 's/ms//')
+                local cpu_p95_lat=$(grep -A6 "CPU test summary:" "$combined_file" 2>/dev/null | grep "P95 Latency:" | awk '{print $NF}' | sed 's/ms//')
+                local cpu_threads_fairness_events=$(grep -A10 "CPU test summary:" "$combined_file" 2>/dev/null | grep "events (avg/stddev):" | head -1)
+                local cpu_threads_fairness_time=$(grep -A12 "CPU test summary:" "$combined_file" 2>/dev/null | grep "execution time (avg/stddev):" | head -1)
 
                 if [ -n "$cpu_events" ]; then
                     cat >> "$report_file" << EOF
@@ -2291,9 +2274,6 @@ generate_report() {
   Avg Latency:   ${cpu_avg_lat:-0} ms
   P95 Latency:   ${cpu_p95_lat:-0} ms
 EOF
-                    if [ -n "$cpu_p99_lat" ] && [ "$cpu_p99_lat" != "0" ]; then
-                        echo "  P99 Latency:   ${cpu_p99_lat} ms" >> "$report_file"
-                    fi
                     if [ -n "$cpu_threads_fairness_events" ] || [ -n "$cpu_threads_fairness_time" ]; then
                         echo "  Threads fairness:" >> "$report_file"
                         if [ -n "$cpu_threads_fairness_events" ]; then
@@ -2886,7 +2866,9 @@ main() {
     CLEANUP="${CLEANUP:-true}"
     
     # Set timestamp
-    TIMESTAMP=$(date '+%Y%m%d_%H%M%S')
+    if [ -z "$TIMESTAMP" ]; then
+        TIMESTAMP=$(date '+%Y%m%d_%H%M%S')
+    fi
     
     # Create output directory
     mkdir -p "$OUTPUT_DIR"
@@ -3141,34 +3123,70 @@ main() {
                     
                     # Execute the remote command and capture output to a temporary file
                     local temp_remote_file="/tmp/vb_remote_${target_ip//./_}_${TIMESTAMP}.txt"
-                    # Build the full remote command with all parameters
-                    local full_remote_command="bash -l -c '$remote_command'"
-                    if ssh "$target_ip" "$full_remote_command 2>&1" > "$temp_remote_file"; then
-                        # Display remote test output (only the summary, not the raw output)
-                        cat "$temp_remote_file"
+                    
+                    # Always use remote vb_benchmark for consistent execution
+                    # Check if remote vb_benchmark exists, if not, skip this server
+                    if ssh "$target_ip" "[ -d ~/sysbench ]" 2>/dev/null; then
+                        # Use remote vb_benchmark
+                        # Build the remote command with only the requested tests
+                        local remote_test_command=""
+                        if [ "$CPU_ENABLED" = "true" ]; then
+                            remote_test_command="cpu"
+                        fi
+                        if [ "$MEMORY_ENABLED" = "true" ]; then
+                            remote_test_command="$remote_test_command mem"
+                        fi
+                        if [ "$IO_ENABLED" = "true" ]; then
+                            remote_test_command="$remote_test_command io"
+                        fi
+                        if [ "$THREADS_ENABLED" = "true" ]; then
+                            remote_test_command="$remote_test_command threads"
+                        fi
+                        if [ "$MUTEX_ENABLED" = "true" ]; then
+                            remote_test_command="$remote_test_command mutex"
+                        fi
                         
-                        # Append to original data file (exec tee already handles data log)
-                        if [ "$CPU_ENABLED" != "false" ]; then
-                            append_to_original "CPU TEST RESULTS (Server: $target_ip)" "$temp_remote_file"
-                        fi
-                        if [ "$MEMORY_ENABLED" != "false" ]; then
-                            append_to_original "MEMORY TEST RESULTS (Server: $target_ip)" "$temp_remote_file"
-                        fi
-                        if [ "$IO_ENABLED" != "false" ]; then
-                            append_to_original "IO TEST RESULTS (Server: $target_ip)" "$temp_remote_file"
-                        fi
-                        if [ "$THREADS_ENABLED" != "false" ]; then
-                            append_to_original "THREADS TEST RESULTS (Server: $target_ip)" "$temp_remote_file"
-                        fi
-                        if [ "$MUTEX_ENABLED" != "false" ]; then
-                            append_to_original "MUTEX TEST RESULTS (Server: $target_ip)" "$temp_remote_file"
+                        # Add duration parameter
+                        if [ -n "$remote_test_command" ]; then
+                            remote_test_command="$remote_test_command DURATION=$DURATION"
                         fi
                         
-                        # Clean up
-                        rm -f "$temp_remote_file"
+                        # Add NO_CHECKS parameter to skip checks during benchmark
+                        local full_remote_command="cd ~/sysbench && TIMESTAMP=$TIMESTAMP ./vb_benchmark $remote_test_command NO_CHECKS=true REMOTE=true"
+                        if ssh "$target_ip" "$full_remote_command" 2>&1 > "$temp_remote_file"; then
+                            # Display remote test output
+                            cat "$temp_remote_file"
+                            
+                            # Fetch original sysbench output from remote server
+                            # Create a temporary directory to extract remote files
+                            local temp_remote_dir="/tmp/vb_remote_${target_ip//./_}_${TIMESTAMP}"
+                            mkdir -p "$temp_remote_dir"
+                            # Extract remote files to temporary directory
+                            ssh "$target_ip" "cd ~/sysbench && tar -czf - output/original_data_${TIMESTAMP}_*" 2>/dev/null | tar -xzf - -C "$temp_remote_dir" 2>/dev/null
+                            
+                            # Append remote original data to main file
+                            for file in "$temp_remote_dir/output/original_data_${TIMESTAMP}_"*; do
+                                if [ -f "$file" ]; then
+                                    echo "" >> "$OUTPUT_DIR/original_data_${TIMESTAMP}_all_results.log"
+                                    echo "================================================================================" >> "$OUTPUT_DIR/original_data_${TIMESTAMP}_all_results.log"
+                                    echo "RESULTS FROM SERVER: $target_ip" >> "$OUTPUT_DIR/original_data_${TIMESTAMP}_all_results.log"
+                                    echo "================================================================================" >> "$OUTPUT_DIR/original_data_${TIMESTAMP}_all_results.log"
+                                    cat "$file" >> "$OUTPUT_DIR/original_data_${TIMESTAMP}_all_results.log"
+                                fi
+                            done
+                            
+                            # Clean up temporary directory
+                            rm -rf "$temp_remote_dir"
+                        else
+                            echo "  ✗ Remote test execution failed"
+                        fi
                     else
-                        echo "  ✗ Remote test execution failed"
+                        echo "  ✗ Remote vb_benchmark not found, skipping this server"
+                        echo "  Hint: Use './vb_benchmark -f servers.txt -i' to distribute vb_benchmark to all servers"
                     fi
+                    
+                    # Clean up
+                    rm -f "$temp_remote_file"
                 else
                     echo "  Skipping remote tests (only network test requested)"
                 fi
