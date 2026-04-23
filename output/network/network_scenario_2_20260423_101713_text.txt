@@ -1,0 +1,12 @@
+
+Authorized users only. All activities may be monitored and reported.
+Connecting to host 172.16.53.128, port 25201
+[  5] local 172.16.54.140 port 57492 connected to 172.16.53.128 port 25201
+[ ID] Interval           Transfer     Bitrate         Retr  Cwnd
+[  5]   0.00-1.00   sec   106 MBytes   885 Mbits/sec    2    515 KBytes       
+[  5]   1.00-2.00   sec   106 MBytes   893 Mbits/sec    0    656 KBytes       
+- - - - - - - - - - - - - - - - - - - - - - - - -
+[ ID] Interval           Transfer     Bitrate         Retr
+[  5]   0.00-2.00   sec   212 MBytes   889 Mbits/sec    2             sender
+[  5]   0.00-2.04   sec   209 MBytes   859 Mbits/sec                  receiver
+iperf Done.
