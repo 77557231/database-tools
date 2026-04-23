@@ -1,0 +1,31 @@
+Loading configuration from server list:
+  Server IP: 172.16.53.128 (local)
+  Client IPs: 172.16.53.128 172.16.54.140 172.16.54.141
+  Local machine as iPerf3 server
+=== Sysbench Installation and Distribution ===
+[Step 1/4] sysbench directory exists on local machine, skipping compilation
+  Local IP: 172.16.53.128
+  Sysbench directory: /home/vastbase/sysbench
+[Step 2/4] Copying vb_benchmark script and tools...
+  ✓ Copied vb_benchmark to /home/vastbase/sysbench/
+  ✓ Copied tools directory to /home/vastbase/sysbench/
+[Step 3/4] Distributing to target servers...
+  Server list: 172.16.53.128 172.16.54.140 172.16.54.141
+  Creating tar package: /home/vastbase/vb_benchmark.tar.gz
+  Distributing to 172.16.54.140...
+  ✓ Successfully distributed to 172.16.54.140
+  Distributing to 172.16.54.141...
+  ✓ Successfully distributed to 172.16.54.141
+  ✓ All files distributed to all target servers
+[Step 4/4] Installation and distribution completed
+
+=== Distribution Summary ===
+  Sysbench installed at: /home/vastbase/sysbench
+  Scripts and tools copied:
+    - /home/vastbase/sysbench/vb_benchmark
+  Target servers:
+    - 172.16.53.128
+    - 172.16.54.140
+    - 172.16.54.141
+
+=== Sysbench installation completed successfully! ===
