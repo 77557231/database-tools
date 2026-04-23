@@ -650,56 +650,11 @@ parse_memory_result() {
     echo "  P95 Latency: ${p95_latency:-0}ms"
 }
 
-# Append result to combined results file
-append_to_combined_result() {
+# Append result to original data file (raw sysbench output for traceability)
+append_to_original() {
     local section_title="$1"
     local result_file="$2"
-    local combined_file="$OUTPUT_DIR/data_${TIMESTAMP}_all_results.txt"
-    local original_file="$OUTPUT_DIR/original_data_${TIMESTAMP}_all_results.txt"
-    
-    # Append to processed results file (includes parsed key metrics)
-    echo "" >> "$combined_file"
-    echo "================================================================================" >> "$combined_file"
-    echo "$section_title" >> "$combined_file"
-    echo "================================================================================" >> "$combined_file"
-    if [ -f "$result_file" ]; then
-        # For sysbench tests, use parsed output with key metrics
-        if echo "$section_title" | grep -E "CPU" > /dev/null; then
-            # Use parse_cpu_result to generate summary
-            parse_cpu_result "$result_file" | grep -v "CPU test summary:" >> "$combined_file"
-        elif echo "$section_title" | grep -E "MEMORY" > /dev/null; then
-            # Use parse_memory_result to generate summary
-            parse_memory_result "$result_file" | grep -v "Memory test summary:" >> "$combined_file"
-        elif echo "$section_title" | grep -E "IO" > /dev/null; then
-            # For IO test, use parse_sysbench_fileio_result
-            if command -v parse_sysbench_fileio_result > /dev/null 2>&1; then
-                parse_sysbench_fileio_result "$result_file" | grep -v "IO test results:" >> "$combined_file"
-            else
-                # Fallback to raw output if parser not found
-                cat "$result_file" >> "$combined_file"
-            fi
-        elif echo "$section_title" | grep -E "THREADS" > /dev/null; then
-            # For threads test, use parse_threads_result if available
-            if command -v parse_threads_result > /dev/null 2>&1; then
-                parse_threads_result "$result_file" | grep -v "Threads test summary:" >> "$combined_file"
-            else
-                # Fallback to raw output if parser not found
-                cat "$result_file" >> "$combined_file"
-            fi
-        elif echo "$section_title" | grep -E "MUTEX" > /dev/null; then
-            # For mutex test, use parse_mutex_result if available
-            if command -v parse_mutex_result > /dev/null 2>&1; then
-                parse_mutex_result "$result_file" | grep -v "Mutex test summary:" >> "$combined_file"
-            else
-                # Fallback to raw output if parser not found
-                cat "$result_file" >> "$combined_file"
-            fi
-        # For other tests, just append the whole file
-        else
-            cat "$result_file" >> "$combined_file"
-        fi
-    fi
-    echo "" >> "$combined_file"
+    local original_file="$OUTPUT_DIR/original_data_${TIMESTAMP}_all_results.log"
     
     # Append to original data file for traceability (only raw test output)
     echo "" >> "$original_file"
@@ -807,7 +762,7 @@ run_sysbench_fileio() {
         parse_sysbench_fileio_result "$temp_output_file"
         
         # Append to combined results file
-        append_to_combined_result "SYSBENCH FILEIO TEST RESULTS" "$temp_output_file"
+        append_to_original "SYSBENCH FILEIO TEST RESULTS" "$temp_output_file"
     fi
     
     # Cleanup temp file
@@ -1154,7 +1109,7 @@ run_serial_network_test() {
                 display_per_second_throughput "$client_text_output" "$server_ip (from $client)"
                 
                 # Append to combined results file
-                append_to_combined_result "NETWORK TEST RESULTS ($server_ip from $client)" "$client_text_output"
+                append_to_original "NETWORK TEST RESULTS ($server_ip from $client)" "$client_text_output"
                 
                 echo "  ✓ Client $client test completed"
             else
@@ -1340,7 +1295,7 @@ run_multi_server_network_test() {
             display_per_second_throughput "$text_output" "$server_ip (from $client_ip)"
             
             # Append to combined results file
-            append_to_combined_result "NETWORK TEST RESULTS ($server_ip from $client_ip)" "$text_output"
+            append_to_original "NETWORK TEST RESULTS ($server_ip from $client_ip)" "$text_output"
             
             echo "  ✓ Network test completed locally"
         else
@@ -1479,7 +1434,7 @@ run_matrix_network_test() {
             display_per_second_throughput "$client_text_output" "$dst (from $src)"
             
             # Append to combined results file
-            append_to_combined_result "NETWORK MATRIX TEST RESULTS ($src -> $dst)" "$client_text_output"
+            append_to_original "NETWORK MATRIX TEST RESULTS ($src -> $dst)" "$client_text_output"
             
             echo "  ✓ Test completed: $src -> $dst = ${bandwidth} MB/s"
         else
@@ -1704,7 +1659,7 @@ EOF
     echo "  ✓ Parallel report generated: $report_file"
     
     # Append report to combined results
-    append_to_combined_result "PARALLEL NETWORK TEST REPORT" "$report_file"
+    append_to_original "PARALLEL NETWORK TEST REPORT" "$report_file"
 }
 
 # Parse iperf3 result for matrix test
@@ -1919,7 +1874,7 @@ run_threads_test() {
         parse_threads_result "$temp_output_file"
         
         # Append to combined results file
-        append_to_combined_result "THREADS TEST RESULTS" "$temp_output_file"
+        append_to_original "THREADS TEST RESULTS" "$temp_output_file"
     fi
     
     # Cleanup temp file
@@ -1984,7 +1939,7 @@ run_mutex_test() {
         parse_mutex_result "$temp_output_file"
         
         # Append to combined results file
-        append_to_combined_result "MUTEX TEST RESULTS" "$temp_output_file"
+        append_to_original "MUTEX TEST RESULTS" "$temp_output_file"
     fi
     
     # Cleanup temp file
@@ -2046,7 +2001,7 @@ run_cpu_test() {
         parse_cpu_result "$temp_output_file"
         
         # Append to combined results file
-        append_to_combined_result "CPU TEST RESULTS" "$temp_output_file"
+        append_to_original "CPU TEST RESULTS" "$temp_output_file"
     fi
     
     # Cleanup temp file
@@ -2089,7 +2044,7 @@ run_memory_test() {
         parse_memory_result "$temp_output_file"
         
         # Append to combined results file
-        append_to_combined_result "MEMORY TEST RESULTS" "$temp_output_file"
+        append_to_original "MEMORY TEST RESULTS" "$temp_output_file"
     fi
     
     # Cleanup temp file
@@ -2147,7 +2102,7 @@ run_pgbench_test() {
         fi
         
         # Append to combined results file
-        append_to_combined_result "PGBENCH TEST RESULTS" "$temp_output_file"
+        append_to_original "PGBENCH TEST RESULTS" "$temp_output_file"
     fi
     
     # Cleanup temp file
@@ -2162,7 +2117,7 @@ run_pgbench_test() {
 # Generate report
 generate_report() {
     local report_file="$OUTPUT_DIR/report_benchmark_${TIMESTAMP}.txt"
-    local combined_file="$OUTPUT_DIR/data_${TIMESTAMP}_all_results.txt"
+    local combined_file="$OUTPUT_DIR/data_${TIMESTAMP}_all_results.log"
 
     # Get system info
     local cpu_cores=$(get_cpu_cores 2>/dev/null || echo "N/A")
@@ -3010,6 +2965,14 @@ main() {
             target_servers=(${filtered_ips[@]})
         fi
         
+        # Initialize tee logging BEFORE any output - all output goes to both terminal and data log file
+        if [ "$REMOTE" != "true" ] && [ "$CHECK_ENABLED" != "true" ]; then
+            # Create OUTPUT_DIR if not exists
+            mkdir -p "$OUTPUT_DIR"
+            # Use exec tee to simultaneously output to terminal and log file
+            exec > >(tee -a "$OUTPUT_DIR/data_${TIMESTAMP}_all_results.log") 2>&1
+        fi
+        
         if [ ${#target_servers[@]} -gt 0 ]; then
             # Local machine as iPerf3 server
             local server_ip=$(get_machine_ip)
@@ -3030,11 +2993,6 @@ main() {
             export NETWORK_CLIENT_IP="$client_ips"
         fi
     fi
-    
-
-    
-    # Update OUTPUT_DIR environment variable
-    export OUTPUT_DIR
     
     # Install and distribute sysbench if -i option is specified
     if [ "${SYSBENCH_INSTALL:-false}" = "true" ]; then
@@ -3189,21 +3147,21 @@ main() {
                         # Display remote test output (only the summary, not the raw output)
                         cat "$temp_remote_file"
                         
-                        # Append to the local combined file based on which tests are enabled
+                        # Append to original data file (exec tee already handles data log)
                         if [ "$CPU_ENABLED" != "false" ]; then
-                            append_to_combined_result "CPU TEST RESULTS (Server: $target_ip)" "$temp_remote_file"
+                            append_to_original "CPU TEST RESULTS (Server: $target_ip)" "$temp_remote_file"
                         fi
                         if [ "$MEMORY_ENABLED" != "false" ]; then
-                            append_to_combined_result "MEMORY TEST RESULTS (Server: $target_ip)" "$temp_remote_file"
+                            append_to_original "MEMORY TEST RESULTS (Server: $target_ip)" "$temp_remote_file"
                         fi
                         if [ "$IO_ENABLED" != "false" ]; then
-                            append_to_combined_result "IO TEST RESULTS (Server: $target_ip)" "$temp_remote_file"
+                            append_to_original "IO TEST RESULTS (Server: $target_ip)" "$temp_remote_file"
                         fi
                         if [ "$THREADS_ENABLED" != "false" ]; then
-                            append_to_combined_result "THREADS TEST RESULTS (Server: $target_ip)" "$temp_remote_file"
+                            append_to_original "THREADS TEST RESULTS (Server: $target_ip)" "$temp_remote_file"
                         fi
                         if [ "$MUTEX_ENABLED" != "false" ]; then
-                            append_to_combined_result "MUTEX TEST RESULTS (Server: $target_ip)" "$temp_remote_file"
+                            append_to_original "MUTEX TEST RESULTS (Server: $target_ip)" "$temp_remote_file"
                         fi
                         
                         # Clean up
@@ -3253,16 +3211,16 @@ main() {
         fi
     fi
     
-    # Generate report
-    generate_report
-    
-    # Only print report path in non-remote mode
+    # Only generate report in non-remote mode
     if [ "$REMOTE" != "true" ]; then
+        # Generate report
+        generate_report
+        
         echo ""
         echo "=== Benchmark completed successfully! ==="
         echo "Report: $OUTPUT_DIR/report_benchmark_${TIMESTAMP}.txt"
-        echo "Detailed results: $OUTPUT_DIR/data_${TIMESTAMP}_all_results.txt"
-        echo "Original data (for traceability): $OUTPUT_DIR/original_data_${TIMESTAMP}_all_results.txt"
+        echo "Detailed results: $OUTPUT_DIR/data_${TIMESTAMP}_all_results.log"
+        echo "Original data (for traceability): $OUTPUT_DIR/original_data_${TIMESTAMP}_all_results.log"
     fi
 }
 
