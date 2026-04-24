@@ -3081,6 +3081,22 @@ main() {
         echo ""
     fi
     
+    # Run system checks before benchmark tests
+    if [ "$REMOTE" != "true" ] && [ "$CHECK_ENABLED" != "true" ]; then
+        # Run system checks
+        check_all
+    fi
+    
+    # Check if sysbench is installed before running tests
+    if [ "$REMOTE" != "true" ] && [ "$CHECK_ENABLED" != "true" ]; then
+        if ! command -v sysbench &> /dev/null; then
+            echo "Error: sysbench is not installed."
+            echo "Please run './oscheckperf -i' to install and distribute sysbench,"
+            echo "or './oscheckperf check' to check dependencies."
+            exit 1
+        fi
+    fi
+    
     if [ ${#target_servers[@]} -gt 0 ]; then
         # Execute tests for each target server
         local server_idx=0
@@ -3294,7 +3310,8 @@ main() {
         echo ""
         echo "=== Benchmark completed successfully! ==="
         echo "Report: $OUTPUT_DIR/report_benchmark_${TIMESTAMP}.txt"
-        echo "Detailed results: $OUTPUT_DIR/original_data_${TIMESTAMP}_all_results.log"
+        echo "Detailed results: $OUTPUT_DIR/data_${TIMESTAMP}_all_results.log"
+        echo "Original data: $OUTPUT_DIR/original_data_${TIMESTAMP}_all_results.log"
     fi
 }
 
@@ -3302,7 +3319,7 @@ main() {
 install_and_distribute_sysbench() {
     local local_ip=$(get_machine_ip)
     local sysbench_dir="$HOME/oscheckperf"
-    local benchmark_dir=$(dirname "$(dirname "$0")")
+    local benchmark_dir=$(realpath "$(dirname "$0")")
     local need_compile=false
     
     echo "=== Oscheckperf Installation and Distribution ==="
@@ -3329,6 +3346,10 @@ install_and_distribute_sysbench() {
             echo "  Local IP: $local_ip"
             echo "  Sysbench directory: $sysbench_dir"
             
+            # Create oscheckperf directory first
+            echo "  Creating oscheckperf directory: $sysbench_dir"
+            mkdir -p "$sysbench_dir"
+            
             # Check if dependencies are already installed
             echo "  Checking build dependencies..."
             if ! command -v gcc &> /dev/null || ! command -v make &> /dev/null || ! command -v automake &> /dev/null; then
@@ -3340,20 +3361,28 @@ install_and_distribute_sysbench() {
             
             # Compile sysbench
             echo "  Compiling sysbench..."
-            run_command "tar -zxf tools/oscheckperf-1.0.20.tar.gz && cd sysbench-1.0.20 && ./autogen.sh && ./configure --without-mysql --prefix=\$HOME/oscheckperf && make && make install" "/dev/null"
+            run_command "tar -zxf tools/sysbench-1.0.20.tar.gz && cd sysbench-1.0.20 && ./autogen.sh && ./configure --without-mysql --prefix=\$HOME/oscheckperf && make && make install" "/dev/null"
             
             # Configure environment
             echo "  Configuring environment variables..."
-            run_command "echo 'export PATH=\$PATH:\$HOME/oscheckperf/bin' >> ~/.bashrc && source ~/.bashrc" "/dev/null"
+            # Add to bashrc only if not already present
+            if ! grep -q "oscheckperf/bin" ~/.bashrc; then
+                run_command "echo 'export PATH=\$PATH:\$HOME/oscheckperf/bin' >> ~/.bashrc" "/dev/null"
+            else
+                echo "  PATH already configured in bashrc, skipping"
+            fi
+            # Also update current session PATH
+            export PATH="$PATH:$HOME/oscheckperf/bin"
+            echo "  ✓ Updated PATH in current session: $PATH"
             
             # Cleanup source directory
             run_command "rm -rf sysbench-1.0.20" "/dev/null"
             
             # Verify installation
             if [ -d "$sysbench_dir" ]; then
-                echo "  ✓ oscheckperf compiled and installed successfully"
+                echo "  ✓ sysbench compiled and installed successfully"
             else
-                echo "  ✗ oscheckperf compilation failed"
+                echo "  ✗ sysbench compilation failed"
                 return 1
             fi
         else
@@ -3369,9 +3398,12 @@ install_and_distribute_sysbench() {
         # Copy oscheckperf script and tools to oscheckperf directory
         echo "[Step 2/4] Copying oscheckperf script and tools..."
         if [ -f "$benchmark_dir/oscheckperf" ]; then
-            cp "$benchmark_dir/oscheckperf" "$sysbench_dir/"
-            chmod +x "$sysbench_dir/oscheckperf"
-            echo "  ✓ Copied oscheckperf to $sysbench_dir/"
+            if cp "$benchmark_dir/oscheckperf" "$sysbench_dir/" 2>/dev/null; then
+                chmod +x "$sysbench_dir/oscheckperf"
+                echo "  ✓ Copied oscheckperf to $sysbench_dir/"
+            else
+                echo "  ⚠️  Failed to copy oscheckperf to $sysbench_dir/, continuing anyway"
+            fi
         else
             echo "  ✗ oscheckperf script not found at $benchmark_dir/oscheckperf"
             return 1
@@ -3379,8 +3411,11 @@ install_and_distribute_sysbench() {
         
         # Copy tools directory if exists
         if [ -d "$benchmark_dir/tools" ]; then
-            cp -r "$benchmark_dir/tools" "$sysbench_dir/"
-            echo "  ✓ Copied tools directory to $sysbench_dir/"
+            if cp -r "$benchmark_dir/tools" "$sysbench_dir/" 2>/dev/null; then
+                echo "  ✓ Copied tools directory to $sysbench_dir/"
+            else
+                echo "  ⚠️  Failed to copy tools directory to $sysbench_dir/, continuing anyway"
+            fi
         fi
         
         # Distribute to other servers if oscheckperf directory exists
@@ -3391,22 +3426,44 @@ install_and_distribute_sysbench() {
             # Create tar package
             local tar_file="$HOME/oscheckperf.tar.gz"
             echo "  Creating tar package: $tar_file"
-            run_command "tar -czf $tar_file -C $HOME sysbench" "/dev/null"
+            if ! run_command "tar -czf $tar_file -C $HOME oscheckperf" "/dev/null"; then
+                echo "  ⚠️  Failed to create tar package, skipping distribution"
+                return 0
+            fi
             
             # SCP to each server except local machine
+            local distribute_success=true
             for ip in "${target_servers[@]}"; do
                 if [ "$ip" != "$local_ip" ]; then
                     echo "  Distributing to $ip..."
-                    run_command "scp -q $tar_file $ip:$HOME/" "/dev/null"
-                    run_command "ssh -q $ip 'rm -rf \$HOME/oscheckperf && mkdir -p \$HOME/oscheckperf && tar -xzf \$HOME/oscheckperf.tar.gz -C \$HOME && rm -f \$HOME/oscheckperf.tar.gz && chmod +x \$HOME/oscheckperf/oscheckperf && echo '\''export PATH=\$PATH:\$HOME/oscheckperf/bin'\'' >> ~/.bashrc && source ~/.bashrc && sysbench --version'" "/dev/null"
-                    echo "  ✓ Successfully distributed to $ip"
+                    if run_command "scp -q $tar_file $ip:$HOME/" "/dev/null"; then
+                        # Create a temporary file to capture SSH output
+                        local ssh_output=$(mktemp)
+                        if run_command "ssh $ip 'rm -rf \$HOME/oscheckperf && mkdir -p \$HOME/oscheckperf && tar -xzf \$HOME/oscheckperf.tar.gz -C \$HOME && rm -f \$HOME/oscheckperf.tar.gz && chmod +x \$HOME/oscheckperf/oscheckperf && if ! grep -q \"oscheckperf/bin\" ~/.bashrc; then echo '\''export PATH=\$PATH:\$HOME/oscheckperf/bin'\'' >> ~/.bashrc; fi && source ~/.bashrc && sysbench --version'" "$ssh_output"; then
+                            echo "  ✓ Successfully distributed to $ip"
+                        else
+                            echo "  ✗ Failed to distribute to $ip: SSH command failed"
+                            echo "  SSH output:"
+                            cat "$ssh_output"
+                            distribute_success=false
+                        fi
+                        # Cleanup temporary file
+                        rm -f "$ssh_output"
+                    else
+                        echo "  ✗ Failed to distribute to $ip: SCP failed"
+                        distribute_success=false
+                    fi
                 fi
             done
             
             # Cleanup tar file
             run_command "rm -f $tar_file" "/dev/null"
             
-            echo "  ✓ All files distributed to all target servers"
+            if [ "$distribute_success" = "true" ]; then
+                echo "  ✓ All files distributed to all target servers"
+            else
+                echo "  ✗ Some distributions failed"
+            fi
         fi
         
         echo "[Step 4/4] Installation and distribution completed"
@@ -3436,20 +3493,28 @@ install_and_distribute_sysbench() {
             
             # Compile sysbench
             echo "  Compiling sysbench..."
-            run_command "tar -zxf tools/oscheckperf-1.0.20.tar.gz && cd sysbench-1.0.20 && ./autogen.sh && ./configure --without-mysql --prefix=\$HOME/oscheckperf && make && make install" "/dev/null"
+            run_command "tar -zxf tools/sysbench-1.0.20.tar.gz && cd sysbench-1.0.20 && ./autogen.sh && ./configure --without-mysql --prefix=\$HOME/oscheckperf && make && make install" "/dev/null"
             
             # Configure environment
             echo "  Configuring environment variables..."
-            run_command "echo 'export PATH=\$PATH:\$HOME/oscheckperf/bin' >> ~/.bashrc && source ~/.bashrc" "/dev/null"
+            # Add to bashrc only if not already present
+            if ! grep -q "oscheckperf/bin" ~/.bashrc; then
+                run_command "echo 'export PATH=\$PATH:\$HOME/oscheckperf/bin' >> ~/.bashrc" "/dev/null"
+            else
+                echo "  PATH already configured in bashrc, skipping"
+            fi
+            # Also update current session PATH
+            export PATH="$PATH:$HOME/oscheckperf/bin"
+            echo "  ✓ Updated PATH in current session: $PATH"
             
             # Cleanup source directory
             run_command "rm -rf sysbench-1.0.20" "/dev/null"
             
             # Verify installation
             if [ -d "$sysbench_dir" ]; then
-                echo "  ✓ oscheckperf compiled and installed successfully"
+                echo "  ✓ sysbench compiled and installed successfully"
             else
-                echo "  ✗ oscheckperf compilation failed"
+                echo "  ✗ sysbench compilation failed"
                 return 1
             fi
         else
