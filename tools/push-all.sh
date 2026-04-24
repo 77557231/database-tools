@@ -81,14 +81,14 @@ fi
 
 echo ""
 
-# 推送到GitHub (main分支和tags)
-echo -e "${YELLOW}正在推送到 GitHub (main)...${NC}"
-if git push github main --tags 2>&1; then
+# 推送到GitHub (master分支和tags)
+echo -e "${YELLOW}正在推送到 GitHub (master)...${NC}"
+if git push github master --tags 2>&1; then
     echo -e "${GREEN}✓ GitHub 推送成功${NC}"  
 else
     echo -e "${YELLOW}⚠ GitHub 推送失败（可能需要配置访问令牌）${NC}"
     echo -e "${YELLOW}  尝试使用 github remote 推送...${NC}"
-    if git push github main --tags 2>&1; then
+    if git push github master --tags 2>&1; then
         echo -e "${GREEN}✓ GitHub 推送成功（通过github remote）${NC}"  
     else
         echo -e "${RED}✗ GitHub 推送失败${NC}"
