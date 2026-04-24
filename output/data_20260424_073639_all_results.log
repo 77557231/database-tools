@@ -1,0 +1,11 @@
+Loading configuration from server list:
+  Server IP: 172.16.53.128 (local)
+  Client IPs: 172.16.53.128 172.16.54.140 172.16.54.141
+  Local machine as iPerf3 server
+=== Oscheckperf Installation and Distribution ===
+[Step 1/4] Installing dependencies and compiling sysbench on local machine...
+  Local IP: 172.16.53.128
+  Sysbench directory: /home/vastbase/oscheckperf
+  Checking build dependencies...
+  Build dependencies already installed, skipping
+  Compiling sysbench...

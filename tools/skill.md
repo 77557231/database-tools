@@ -7,8 +7,8 @@ Vastbase 系统基准测试工具是一个为 Vastbase、openGauss 和 PostgreSQ
 ## 2. 项目结构
 
 ```
-vb_benchmark/
-├── vb_benchmark              # 主入口脚本
+oscheckperf/
+├── oscheckperf              # 主入口脚本
 ├── parameter.conf            # 统一参数配置文件
 ├── output/                   # 测试结果输出目录
 ├── tools/
@@ -20,7 +20,7 @@ vb_benchmark/
 ## 3. 开发规范
 
 ### 3.1 代码结构规范
-- 所有功能集成在单一的 `vb_benchmark` 脚本中
+- 所有功能集成在单一的 `oscheckperf` 脚本中
 - 避免使用 lib 等目录，保持代码简洁
 - 使用函数模块化设计，提高代码可维护性
 - 函数命名使用下划线分隔的小写字母（如 `run_cpu_test`）
