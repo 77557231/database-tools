@@ -14,8 +14,8 @@ A system-level performance benchmarking tool designed for Vastbase, openGauss, a
 ## Project Structure
 
 ```
-vb_benchmark/
-├── vb_benchmark              # Main entry script
+oscheckperf/
+├── oscheckperf              # Main entry script
 ├── output/                   # Test results output directory
 ├── tools/
 │   └── skill.md              # Development documentation
@@ -55,7 +55,7 @@ sudo apt-get install -y sysbench fio iperf3 jq
 
 #### Basic Usage
 ```bash
-./vb_benchmark
+./oscheckperf
 ```
 
 
@@ -64,16 +64,16 @@ sudo apt-get install -y sysbench fio iperf3 jq
 
 ```bash
 # Override test duration
-./vb_benchmark DURATION=60
+./oscheckperf DURATION=60
 
 # Override CPU max prime
-./vb_benchmark CPU_MAX_PRIME=10000
+./oscheckperf CPU_MAX_PRIME=10000
 
 # Disable specific tests
-./vb_benchmark MEMORY_ENABLED=false NETWORK_ENABLED=false
+./oscheckperf MEMORY_ENABLED=false NETWORK_ENABLED=false
 
 # Use fio for IO test
-./vb_benchmark IO_TOOL=fio
+./oscheckperf IO_TOOL=fio
 
 # Set fio test duration and directory
 ```
@@ -82,94 +82,94 @@ sudo apt-get install -y sysbench fio iperf3 jq
 
 ```bash
 # Run CPU test
-./vb_benchmark cpu
+./oscheckperf cpu
 
 # Run memory test
-./vb_benchmark mem
+./oscheckperf mem
 
 # Run IO test
-./vb_benchmark io
+./oscheckperf io
 
 # Run network test (matrix mode)
-./vb_benchmark network -f servers.txt NETWORK_MODE=matrix
+./oscheckperf network -f servers.txt NETWORK_MODE=matrix
 
 # Run threads test
-./vb_benchmark thread
+./oscheckperf thread
 
 # Run mutex test
-./vb_benchmark mutex
+./oscheckperf mutex
 
 # Run system checks (dependencies, permissions, disk space, network)
-./vb_benchmark check
+./oscheckperf check
 
 # Run all tests (default)
-./vb_benchmark all
+./oscheckperf all
 ```
 
 #### Combine subcommand with parameters
 
 ```bash
 # Run CPU test with specific parameters
-./vb_benchmark cpu DURATION=20 CPU_MAX_PRIME=10000
+./oscheckperf cpu DURATION=20 CPU_MAX_PRIME=10000
 
 # Run IO test with fio
-./vb_benchmark io IO_TOOL=fio FIO_DURATION=30
+./oscheckperf io IO_TOOL=fio FIO_DURATION=30
 
 # Run network test with server list
-./vb_benchmark network -f "192.168.1.101 192.168.1.102" NETWORK_MODE=parallel
+./oscheckperf network -f "192.168.1.101 192.168.1.102" NETWORK_MODE=parallel
 
 # Matrix network test (all-to-all cross testing)
-./vb_benchmark -f servers.txt NETWORK_MODE=matrix
+./oscheckperf -f servers.txt NETWORK_MODE=matrix
 
 # Advanced usage
 # Run system checks with custom test directory
-./vb_benchmark -f servers.txt check IO_TEST_PATH='/home/vastbase/vb_test'
+./oscheckperf -f servers.txt check IO_TEST_PATH='/home/vastbase/vb_test'
 # Run multiple tests with custom parameters
-./vb_benchmark cpu mem -f servers.txt DURATION=2 THREADS=4
+./oscheckperf cpu mem -f servers.txt DURATION=2 THREADS=4
 # Run IO test with fio and custom parameters
-./vb_benchmark io -f servers.txt IO_TOOL=fio IO_TEST_MODE=read IO_TOTAL_SIZE=10G
+./oscheckperf io -f servers.txt IO_TOOL=fio IO_TEST_MODE=read IO_TOTAL_SIZE=10G
 ```
 
 #### Install sysbench
 
 Single machine installation:
 ```bash
-./vb_benchmark -i
+./oscheckperf -i
 ```
 
 Multi-machine installation (from server list file):
 ```bash
-./vb_benchmark -i -f servers.txt
+./oscheckperf -i -f servers.txt
 ```
 
 Multi-machine installation (direct IP list):
 ```bash
-./vb_benchmark -i -f "192.168.1.101 192.168.1.102 192.168.1.103"
+./oscheckperf -i -f "192.168.1.101 192.168.1.102 192.168.1.103"
 ```
 
 **Installation Logic**:
 
 | Scenario | Behavior |
 |----------|----------|
-| Local machine in IP list and no `$HOME/sysbench` | Compile first, then distribute |
-| Local machine has `$HOME/sysbench` directory | Skip compilation, directly package and distribute |
+| Local machine in IP list and no `$HOME/oscheckperf` | Compile first, then distribute |
+| Local machine has `$HOME/oscheckperf` directory | Skip compilation, directly package and distribute |
 | Local machine not in IP list | All servers need distribution (from local existing directory) |
 | SCP distribution | Automatically exclude local machine IP |
 
 **Execution Method**:
-- **Local Execution**: Directly use the `vb_benchmark` script in the current directory
-- **Remote Execution**: Call the `$HOME/sysbench/vb_benchmark` script on remote servers via SSH
+- **Local Execution**: Directly use the `oscheckperf` script in the current directory
+- **Remote Execution**: Call the `$HOME/oscheckperf/oscheckperf` script on remote servers via SSH
 
 **Notes**:
-- `$HOME/sysbench` directory will be created automatically, skip compilation if it already exists
-- For multi-machine installation, if local machine is in the IP list and no `$HOME/sysbench` directory exists, it will compile first then distribute
+- `$HOME/oscheckperf` directory will be created automatically, skip compilation if it already exists
+- For multi-machine installation, if local machine is in the IP list and no `$HOME/oscheckperf` directory exists, it will compile first then distribute
 - SCP distribution will automatically exclude the local machine IP
 - Target servers need SSH passwordless login configured
 - Environment variables will be automatically configured and take effect after installation
 
 #### Dry Run Mode
 ```bash
-./vb_benchmark -d
+./oscheckperf -d
 ```
 ### 4. View Reports
 ```bash
@@ -226,7 +226,7 @@ FIO testing works differently:
 
 **IO_TEST_PATH Parameter**:
 
-- Default test path is `$HOME/vb_benchmark/io_test`
+- Default test path is `$HOME/oscheckperf/io_test`
 - **Do NOT use `/tmp` directory**: On some servers, `/tmp` is tmpfs (memory filesystem), which leads to inaccurate test results (testing memory instead of disk)
 - It is recommended to use the disk partition where the database data directory is located for more reference value
 - Ensure the target partition has enough available space (at least larger than `IO_TOTAL_SIZE`)
@@ -235,7 +235,7 @@ FIO testing works differently:
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `IO_TEST_PATH` | `$HOME/vb_benchmark/io_test` | Test file directory |
+| `IO_TEST_PATH` | `$HOME/oscheckperf/io_test` | Test file directory |
 | `IO_TOTAL_SIZE` | `1G` | Total test file size (shared by sysbench and fio) |
 | `IO_TEST_MODE` | `rndrw` | Test mode (seqwr/seqrd/rndwr/rndrd/rndrw) |
 | `IO_FILE_NUM` | `1` | Number of test files |
@@ -247,13 +247,13 @@ FIO testing works differently:
 
 ```bash
 # Random read/write test with sysbench
-./vb_benchmark io DURATION=60 IO_TOTAL_SIZE=2G
+./oscheckperf io DURATION=60 IO_TOTAL_SIZE=2G
 
 # Sequential read test with fio
-./vb_benchmark io IO_TOOL=fio IO_TEST_MODE=read FIO_DURATION=60
+./oscheckperf io IO_TOOL=fio IO_TEST_MODE=read FIO_DURATION=60
 
 # Specify test path to database data directory
-./vb_benchmark io IO_TEST_PATH=/data/vastbase/pg_xlog
+./oscheckperf io IO_TEST_PATH=/data/vastbase/pg_xlog
 ```
 
 ### Network Test
@@ -290,14 +290,14 @@ FIO testing works differently:
 **A**: Test files are only written to the specified directory (default `/tmp`) and can be automatically cleaned up after testing
 
 ### Q3: How to customize IO test path?
-**A**: Use `IO_TEST_PATH` parameter: `./vb_benchmark IO_TEST_PATH=/data`
+**A**: Use `IO_TEST_PATH` parameter: `./oscheckperf IO_TEST_PATH=/data`
 
 ### Q4: How to configure multi-client for network testing?
 
 **A**: Create a server list file `servers.txt` containing all IP addresses to test, then specify it with the `-f` parameter:
 
 ```bash
-./vb_benchmark network -f servers.txt
+./oscheckperf network -f servers.txt
 ```
 
 ### Q5: What is the difference between NETWORK_MODE and NETWORK_PARALLEL parameters?
@@ -314,10 +314,10 @@ FIO testing works differently:
 **Examples**:
 ```bash
 # Serial execution, each test uses 4 parallel connections
-./vb_benchmark network -f servers.txt NETWORK_MODE=serial NETWORK_PARALLEL=4
+./oscheckperf network -f servers.txt NETWORK_MODE=serial NETWORK_PARALLEL=4
 
 # Parallel execution, each test uses 4 parallel connections
-./vb_benchmark network -f servers.txt NETWORK_MODE=parallel NETWORK_PARALLEL=4
+./oscheckperf network -f servers.txt NETWORK_MODE=parallel NETWORK_PARALLEL=4
 ```
 
 ## Best Practices

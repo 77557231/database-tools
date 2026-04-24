@@ -16,8 +16,8 @@
 ## 项目结构
 
 ```
-vb_benchmark/
-├── vb_benchmark              # 主入口脚本
+oscheckperf/
+├── oscheckperf              # 主入口脚本
 ├── output/                   # 测试结果输出目录
 ├── tools/
 │   └── skill.md              # 开发规范文档
@@ -60,23 +60,23 @@ sudo apt-get install -y sysbench fio iperf3 jq
 #### 基本用法
 
 ```bash
-./vb_benchmark
+./oscheckperf
 ```
 
 #### 命令行参数覆盖
 
 ```bash
 # 覆盖测试时长
-./vb_benchmark DURATION=60
+./oscheckperf DURATION=60
 
 # 覆盖 CPU 最大素数
-./vb_benchmark CPU_MAX_PRIME=10000
+./oscheckperf CPU_MAX_PRIME=10000
 
 # 禁用特定测试
-./vb_benchmark MEMORY_ENABLED=false NETWORK_ENABLED=false
+./oscheckperf MEMORY_ENABLED=false NETWORK_ENABLED=false
 
 # 使用 fio 进行 IO 测试
-./vb_benchmark IO_TOOL=fio
+./oscheckperf IO_TOOL=fio
 
 # 设置 fio 测试时长和目录
 ```
@@ -85,52 +85,52 @@ sudo apt-get install -y sysbench fio iperf3 jq
 
 ```bash
 # 运行 CPU 测试
-./vb_benchmark cpu
+./oscheckperf cpu
 
 # 运行内存测试
-./vb_benchmark mem
+./oscheckperf mem
 
 # 运行 IO 测试
-./vb_benchmark io
+./oscheckperf io
 
 # 运行网络测试（矩阵模式）
-./vb_benchmark network -f servers.txt NETWORK_MODE=matrix
+./oscheckperf network -f servers.txt NETWORK_MODE=matrix
 
 # 运行线程测试
-./vb_benchmark thread
+./oscheckperf thread
 
 # 运行互斥锁测试
-./vb_benchmark mutex
+./oscheckperf mutex
 
 # 运行系统检查（依赖项、权限、磁盘空间、网络）
-./vb_benchmark check
+./oscheckperf check
 
 # 运行所有测试（默认）
-./vb_benchmark all
+./oscheckperf all
 ```
 
 #### 子命令与参数组合使用
 
 ```bash
 # 运行 CPU 测试并指定参数
-./vb_benchmark cpu DURATION=20 CPU_MAX_PRIME=10000
+./oscheckperf cpu DURATION=20 CPU_MAX_PRIME=10000
 
 # 运行 IO 测试并使用 fio
-./vb_benchmark io IO_TOOL=fio FIO_DURATION=30
+./oscheckperf io IO_TOOL=fio FIO_DURATION=30
 
 # 运行网络测试并指定服务器列表
-./vb_benchmark network -f "192.168.1.101 192.168.1.102" NETWORK_MODE=parallel
+./oscheckperf network -f "192.168.1.101 192.168.1.102" NETWORK_MODE=parallel
 
 # 矩阵网络测试（全矩阵交叉测试）
-./vb_benchmark -f servers.txt NETWORK_MODE=matrix
+./oscheckperf -f servers.txt NETWORK_MODE=matrix
 
 # 高级用法
 # 运行系统检查并指定测试目录
-./vb_benchmark -f servers.txt check IO_TEST_PATH='/home/vastbase/vb_test'
+./oscheckperf -f servers.txt check IO_TEST_PATH='/home/vastbase/vb_test'
 # 同时运行多个测试并指定参数
-./vb_benchmark cpu mem -f servers.txt DURATION=2 THREADS=4
+./oscheckperf cpu mem -f servers.txt DURATION=2 THREADS=4
 # 运行 IO 测试并使用 fio 工具和自定义参数
-./vb_benchmark io -f servers.txt IO_TOOL=fio IO_TEST_MODE=read IO_TOTAL_SIZE=10G
+./oscheckperf io -f servers.txt IO_TOOL=fio IO_TEST_MODE=read IO_TOTAL_SIZE=10G
 ```
 
 #### 安装 sysbench
@@ -138,7 +138,7 @@ sudo apt-get install -y sysbench fio iperf3 jq
 本工具支持自动编译和分发 sysbench 到远程服务器，降低最小额外安装影响。
 
 **本机编译拷贝远程服务器方式**：
-1. **自动编译**：如果本机没有 `$HOME/sysbench` 目录，会自动下载并编译 sysbench
+1. **自动编译**：如果本机没有 `$HOME/oscheckperf` 目录，会自动下载并编译 sysbench
 2. **打包分发**：将编译好的 sysbench 打包并通过 SCP 分发到远程服务器
 3. **最小影响**：无需在远程服务器上安装编译依赖，只需 SSH 免密登录即可
 
@@ -146,31 +146,31 @@ sudo apt-get install -y sysbench fio iperf3 jq
 
 单机安装：
 ```bash
-./vb_benchmark -i
+./oscheckperf -i
 ```
 
 多机器安装（从服务器列表文件）：
 ```bash
-./vb_benchmark -i -f servers.txt
+./oscheckperf -i -f servers.txt
 ```
 
 多机器安装（直接指定 IP 列表）：
 ```bash
-./vb_benchmark -i -f "192.168.1.101 192.168.1.102 192.168.1.103"
+./oscheckperf -i -f "192.168.1.101 192.168.1.102 192.168.1.103"
 ```
 
 **安装逻辑**：
 
 | 场景 | 行为 |
 |------|------|
-| 本机在 IP 列表中且无 `$HOME/sysbench` | 先编译，再分发 |
-| 本机有 `$HOME/sysbench` 目录 | 跳过编译，直接打包分发 |
+| 本机在 IP 列表中且无 `$HOME/oscheckperf` | 先编译，再分发 |
+| 本机有 `$HOME/oscheckperf` 目录 | 跳过编译，直接打包分发 |
 | 本机不在 IP 列表中 | 所有服务器都需要分发（从本地已有目录） |
 | SCP 分发 | 自动排除本机器 IP |
 
 **执行方式**：
-- **本地执行**：直接使用当前目录下的 `vb_benchmark` 脚本
-- **远程执行**：通过 SSH 调用远程服务器上的 `$HOME/sysbench/vb_benchmark` 脚本
+- **本地执行**：直接使用当前目录下的 `oscheckperf` 脚本
+- **远程执行**：通过 SSH 调用远程服务器上的 `$HOME/oscheckperf/oscheckperf` 脚本
 
 **优势**：
 - 无需在远程服务器上安装编译工具和依赖
@@ -179,8 +179,8 @@ sudo apt-get install -y sysbench fio iperf3 jq
 - 自动配置环境变量，使用方便
 
 **注意事项**：
-- `$HOME/sysbench` 目录会自动创建，若已存在则跳过编译过程
-- 多机器安装时，若本机在 IP 列表中且没有 `$HOME/sysbench` 目录，会先编译再分发
+- `$HOME/oscheckperf` 目录会自动创建，若已存在则跳过编译过程
+- 多机器安装时，若本机在 IP 列表中且没有 `$HOME/oscheckperf` 目录，会先编译再分发
 - SCP 分发时会自动排除本机器 IP
 - 目标服务器需要配置 SSH 免密登录
 - 安装完成后会自动配置环境变量并生效
@@ -188,7 +188,7 @@ sudo apt-get install -y sysbench fio iperf3 jq
 #### 干运行模式
 
 ```bash
-./vb_benchmark -d
+./oscheckperf -d
 ```
 
 ### 4. 查看报告
@@ -252,7 +252,7 @@ FIO 测试采用不同的工作方式：
 
 **IO_TEST_PATH 参数说明**：
 
-- 默认测试路径为 `$HOME/vb_benchmark/io_test`
+- 默认测试路径为 `$HOME/oscheckperf/io_test`
 - **不要使用 `/tmp` 目录**：某些服务器的 `/tmp` 是 tmpfs（内存文件系统），会导致测试结果不准确（测试的是内存而非磁盘）
 - 建议使用数据库数据目录所在的磁盘分区，结果更具参考价值
 - 确保目标分区有足够的可用空间（至少大于 `IO_TOTAL_SIZE`）
@@ -261,7 +261,7 @@ FIO 测试采用不同的工作方式：
 
 | 参数 | 默认值 | 说明 |
 |------|--------|------|
-| `IO_TEST_PATH` | `$HOME/vb_benchmark/io_test` | 测试文件目录 |
+| `IO_TEST_PATH` | `$HOME/oscheckperf/io_test` | 测试文件目录 |
 | `IO_TOTAL_SIZE` | `1G` | 测试文件总大小（sysbench 和 fio 通用） |
 | `IO_TEST_MODE` | `rndrw` | 测试模式（seqwr/seqrd/rndwr/rndrd/rndrw） |
 | `IO_FILE_NUM` | `1` | 测试文件数量 |
@@ -273,13 +273,13 @@ FIO 测试采用不同的工作方式：
 
 ```bash
 # 使用 sysbench 进行随机读写测试
-./vb_benchmark io DURATION=60 IO_TOTAL_SIZE=2G
+./oscheckperf io DURATION=60 IO_TOTAL_SIZE=2G
 
 # 使用 fio 进行顺序读测试
-./vb_benchmark io IO_TOOL=fio IO_TEST_MODE=read FIO_DURATION=60
+./oscheckperf io IO_TOOL=fio IO_TEST_MODE=read FIO_DURATION=60
 
 # 指定测试路径到数据库数据目录
-./vb_benchmark io IO_TEST_PATH=/data/vastbase/pg_xlog
+./oscheckperf io IO_TEST_PATH=/data/vastbase/pg_xlog
 ```
 
 ### 网络测试
@@ -323,14 +323,14 @@ FIO 测试采用不同的工作方式：
 
 ### Q3: 如何自定义 IO 测试路径？
 
-**A**: 使用 `IO_TEST_PATH` 参数：`./vb_benchmark IO_TEST_PATH=/data`
+**A**: 使用 `IO_TEST_PATH` 参数：`./oscheckperf IO_TEST_PATH=/data`
 
 ### Q4: 网络测试如何配置多客户端？
 
 **A**: 创建服务器列表文件 `servers.txt`，包含所有需要测试的 IP 地址，然后使用 `-f` 参数指定：
 
 ```bash
-./vb_benchmark network -f servers.txt
+./oscheckperf network -f servers.txt
 ```
 
 ### Q5: NETWORK_MODE 和 NETWORK_PARALLEL 参数的区别是什么？
@@ -347,10 +347,10 @@ FIO 测试采用不同的工作方式：
 **示例**：
 ```bash
 # 串行执行，每个测试使用 4 个并行连接
-./vb_benchmark network -f servers.txt NETWORK_MODE=serial NETWORK_PARALLEL=4
+./oscheckperf network -f servers.txt NETWORK_MODE=serial NETWORK_PARALLEL=4
 
 # 并行执行，每个测试使用 4 个并行连接
-./vb_benchmark network -f servers.txt NETWORK_MODE=parallel NETWORK_PARALLEL=4
+./oscheckperf network -f servers.txt NETWORK_MODE=parallel NETWORK_PARALLEL=4
 ```
 
 ## 最佳实践

@@ -1,6 +1,6 @@
 #!/bin/bash
 #--------------------------------------------------------------------------------
-#-- File name:   vb_benchmark
+#-- File name:   oscheckperf
 #-- Version:     v2.0.0
 #-- Purpose:     Database System Benchmark Tool
 #-- Author:      Vastbase Performance Team
@@ -233,7 +233,7 @@ show_help() {
     echo "  IO_TOTAL_SIZE=<size>        Total file size for IO test (default: 1G)"
     echo "  IO_TEST_MODE=<mode>         Test mode: rndrw|read|write (default: rndrw)"
     echo "  IO_FILE_NUM=<number>        Number of test files (default: 1)"
-    echo "  IO_TEST_PATH=<path>         Test directory path (default: \$HOME/vb_benchmark/io_test)"
+    echo "  IO_TEST_PATH=<path>         Test directory path (default: \$HOME/oscheckperf/io_test)"
     echo "  FIO_DURATION=<seconds>      fio test duration (default: same as DURATION)"
     echo ""
     echo "Network test parameters:"
@@ -269,7 +269,7 @@ show_help() {
     echo ""
     echo ""
     echo "Project structure:"
-    echo "  vb_benchmark/"
+    echo "  oscheckperf/"
     echo "  ├── output/                   Test results output directory"
     echo "  ├── tools/"
     echo "  │   └── skill.md              Development documentation"
@@ -510,7 +510,7 @@ check_permissions() {
         echo "  ✓ Running as root"
     else
         echo "  ⚠ Running as non-root user, some tests may fail"
-        echo "    Suggestion: Run with 'sudo vb_benchmark ...'"
+        echo "    Suggestion: Run with 'sudo oscheckperf ...'"
     fi
 }
 
@@ -722,7 +722,7 @@ run_sysbench_fileio() {
     local temp_output_file="/tmp/vb_fileio_${TIMESTAMP}.txt"
     
     # Use a real disk directory instead of /tmp (which may be tmpfs)
-    local test_dir="${IO_TEST_PATH:-$HOME/vb_benchmark/io_test}"
+    local test_dir="${IO_TEST_PATH:-$HOME/oscheckperf/io_test}"
     
     # Only display test info in non-remote mode
     if [ "$REMOTE" != "true" ]; then
@@ -829,7 +829,7 @@ rw=${rw_type}
 bs=${bs}
 iodepth=${iodepth}
 numjobs=${numjobs}
-filename=${IO_TEST_PATH:-$HOME/vb_benchmark/io_test}/fio_test_${profile}
+filename=${IO_TEST_PATH:-$HOME/oscheckperf/io_test}/fio_test_${profile}
 EOF
         
         # Show configuration file content (also shown in dry run mode)
@@ -848,7 +848,7 @@ EOF
         rm -f "$fio_conf"
         
         # Cleanup fio test file
-        local fio_test_file="${IO_TEST_PATH:-$HOME/vb_benchmark/io_test}/fio_test_${profile}"
+        local fio_test_file="${IO_TEST_PATH:-$HOME/oscheckperf/io_test}/fio_test_${profile}"
         rm -f "$fio_test_file"
         
         # Parse result
@@ -1142,28 +1142,25 @@ run_serial_network_test() {
         # Keep the files for report generation
     done
     
-    echo ""
-    echo "✓ Network test completed for all clients"
-    
-    # Output summary of results to terminal
+    # Output summary of results to terminal only (not to data file)
     if [ ${#results[@]} -gt 0 ]; then
-        echo ""
+        echo "" >&2
+        echo "✓ Network test completed for all clients" >&2
+        echo "" >&2
         for result in "${results[@]}"; do
             IFS='|' read -r src dst bw <<< "$result"
-            echo "- $src -> $dst = ${bw} MB/s"
+            echo "- $src -> $dst = ${bw} MB/s" >&2
         done
     fi
     
-    # Stop iperf3 server    
-echo "  Stopping iperf3 server..."    
-if [ "$DRY_RUN" = true ]; then    
-    # Dry run mode: just show the commands    
-echo "[DRY RUN] pkill -f \"iperf3 -s -p $port\""    
-else    
-    # Actual run: stop the server    
-pkill -f "iperf3 -s -p $port" 2>/dev/null || true    
-sleep 1    
-fi
+    # Stop iperf3 server (only log to terminal, not data file)
+    echo "  Stopping iperf3 server..." >&2
+    if [ "$DRY_RUN" = true ]; then
+        echo "[DRY RUN] pkill -f \"iperf3 -s -p $port\"" >&2
+    else
+        pkill -f "iperf3 -s -p $port" 2>/dev/null || true
+        sleep 1
+    fi
     
     return 0
 }
@@ -3059,7 +3056,7 @@ main() {
                     else
                         # Remote server check
                         echo "  Executing remote checks on $target_ip..."
-                        ssh "$target_ip" "\$HOME/sysbench/vb_benchmark --remote check"
+                        ssh "$target_ip" "\$HOME/oscheckperf/oscheckperf --remote check"
                     fi
                     echo ""
                 done
@@ -3125,7 +3122,7 @@ main() {
                 echo "  Executing remote tests on $target_ip..."
                 
                 # Build the remote command with all enabled tests
-                local remote_command="\$HOME/sysbench/vb_benchmark --remote"
+                local remote_command="\$HOME/oscheckperf/oscheckperf --remote"
                 local has_non_network_tests=false
                 
                 # Add tests to remote command based on enabled flags
@@ -3184,10 +3181,10 @@ main() {
                     # Execute the remote command and capture output to a temporary file
                     local temp_remote_file="/tmp/vb_remote_${target_ip//./_}_${TIMESTAMP}.txt"
                     
-                    # Always use remote vb_benchmark for consistent execution
-                    # Check if remote vb_benchmark exists, if not, skip this server
-                    if ssh "$target_ip" "[ -d ~/sysbench ]" 2>/dev/null; then
-                        # Use remote vb_benchmark
+                    # Always use remote oscheckperf for consistent execution
+                        # Check if remote oscheckperf exists, if not, skip this server
+                        if ssh "$target_ip" "[ -d ~/oscheckperf ]" 2>/dev/null; then
+                            # Use remote oscheckperf
                         # Build the remote command with only the requested tests
                         local remote_test_command=""
                         if [ "$CPU_ENABLED" = "true" ]; then
@@ -3212,7 +3209,7 @@ main() {
                         fi
                         
                         # Add NO_CHECKS parameter to skip checks during benchmark
-                        local full_remote_command="cd ~/sysbench && TIMESTAMP=$TIMESTAMP ./vb_benchmark $remote_test_command NO_CHECKS=true REMOTE=true"
+                        local full_remote_command="cd ~/oscheckperf && TIMESTAMP=$TIMESTAMP ./oscheckperf $remote_test_command NO_CHECKS=true REMOTE=true"
                         if ssh "$target_ip" "$full_remote_command" 2>&1 > "$temp_remote_file"; then
                             # Display remote test output
                             cat "$temp_remote_file"
@@ -3222,7 +3219,7 @@ main() {
                             local temp_remote_dir="/tmp/vb_remote_${target_ip//./_}_${TIMESTAMP}"
                             mkdir -p "$temp_remote_dir"
                             # Extract remote files to temporary directory
-                            ssh "$target_ip" "cd ~/sysbench && tar -czf - output/original_data_${TIMESTAMP}_*" 2>/dev/null | tar -xzf - -C "$temp_remote_dir" 2>/dev/null
+                            ssh "$target_ip" "cd ~/oscheckperf && tar -czf - output/original_data_${TIMESTAMP}_*" 2>/dev/null | tar -xzf - -C "$temp_remote_dir" 2>/dev/null
                             
                             # Append remote original data to main file
                             for file in "$temp_remote_dir/output/original_data_${TIMESTAMP}_"*; do
@@ -3241,8 +3238,8 @@ main() {
                             echo "  ✗ Remote test execution failed"
                         fi
                     else
-                        echo "  ✗ Remote vb_benchmark not found, skipping this server"
-                        echo "  Hint: Use './vb_benchmark -f servers.txt -i' to distribute vb_benchmark to all servers"
+                        echo "  ✗ Remote oscheckperf not found, skipping this server"
+                        echo "  Hint: Use './oscheckperf -f servers.txt -i' to distribute oscheckperf to all servers"
                     fi
                     
                     # Clean up
@@ -3304,11 +3301,11 @@ main() {
 # Install and distribute sysbench to target servers
 install_and_distribute_sysbench() {
     local local_ip=$(get_machine_ip)
-    local sysbench_dir="$HOME/sysbench"
+    local sysbench_dir="$HOME/oscheckperf"
     local benchmark_dir=$(dirname "$(dirname "$0")")
     local need_compile=false
     
-    echo "=== Sysbench Installation and Distribution ==="
+    echo "=== Oscheckperf Installation and Distribution ==="
     
     # Check if local machine is in server list and needs compilation
     if [ ${#target_servers[@]} -gt 0 ]; then
@@ -3321,7 +3318,7 @@ install_and_distribute_sysbench() {
             fi
         done
         
-        # If local machine is in list and no sysbench directory, need to compile
+        # If local machine is in list and no oscheckperf directory, need to compile
         if [ "$is_local_in_list" = "true" ] && [ ! -d "$sysbench_dir" ]; then
             need_compile=true
         fi
@@ -3343,25 +3340,25 @@ install_and_distribute_sysbench() {
             
             # Compile sysbench
             echo "  Compiling sysbench..."
-            run_command "tar -zxf tools/sysbench-1.0.20.tar.gz && cd sysbench-1.0.20 && ./autogen.sh && ./configure --without-mysql --prefix=\$HOME/sysbench && make && make install" "/dev/null"
+            run_command "tar -zxf tools/oscheckperf-1.0.20.tar.gz && cd sysbench-1.0.20 && ./autogen.sh && ./configure --without-mysql --prefix=\$HOME/oscheckperf && make && make install" "/dev/null"
             
             # Configure environment
             echo "  Configuring environment variables..."
-            run_command "echo 'export PATH=\$PATH:\$HOME/sysbench/bin' >> ~/.bashrc && source ~/.bashrc" "/dev/null"
+            run_command "echo 'export PATH=\$PATH:\$HOME/oscheckperf/bin' >> ~/.bashrc && source ~/.bashrc" "/dev/null"
             
             # Cleanup source directory
             run_command "rm -rf sysbench-1.0.20" "/dev/null"
             
             # Verify installation
             if [ -d "$sysbench_dir" ]; then
-                echo "  ✓ sysbench compiled and installed successfully"
+                echo "  ✓ oscheckperf compiled and installed successfully"
             else
-                echo "  ✗ sysbench compilation failed"
+                echo "  ✗ oscheckperf compilation failed"
                 return 1
             fi
         else
             if [ -d "$sysbench_dir" ]; then
-                echo "[Step 1/4] sysbench directory exists on local machine, skipping compilation"
+                echo "[Step 1/4] oscheckperf directory exists on local machine, skipping compilation"
                 echo "  Local IP: $local_ip"
                 echo "  Sysbench directory: $sysbench_dir"
             else
@@ -3369,14 +3366,14 @@ install_and_distribute_sysbench() {
             fi
         fi
         
-        # Copy vb_benchmark script and tools to sysbench directory
-        echo "[Step 2/4] Copying vb_benchmark script and tools..."
-        if [ -f "$benchmark_dir/vb_benchmark" ]; then
-            cp "$benchmark_dir/vb_benchmark" "$sysbench_dir/"
-            chmod +x "$sysbench_dir/vb_benchmark"
-            echo "  ✓ Copied vb_benchmark to $sysbench_dir/"
+        # Copy oscheckperf script and tools to oscheckperf directory
+        echo "[Step 2/4] Copying oscheckperf script and tools..."
+        if [ -f "$benchmark_dir/oscheckperf" ]; then
+            cp "$benchmark_dir/oscheckperf" "$sysbench_dir/"
+            chmod +x "$sysbench_dir/oscheckperf"
+            echo "  ✓ Copied oscheckperf to $sysbench_dir/"
         else
-            echo "  ✗ vb_benchmark script not found at $benchmark_dir/vb_benchmark"
+            echo "  ✗ oscheckperf script not found at $benchmark_dir/oscheckperf"
             return 1
         fi
         
@@ -3386,13 +3383,13 @@ install_and_distribute_sysbench() {
             echo "  ✓ Copied tools directory to $sysbench_dir/"
         fi
         
-        # Distribute to other servers if sysbench directory exists
+        # Distribute to other servers if oscheckperf directory exists
         if [ -d "$sysbench_dir" ]; then
             echo "[Step 3/4] Distributing to target servers..."
             echo "  Server list: ${target_servers[*]}"
             
             # Create tar package
-            local tar_file="$HOME/vb_benchmark.tar.gz"
+            local tar_file="$HOME/oscheckperf.tar.gz"
             echo "  Creating tar package: $tar_file"
             run_command "tar -czf $tar_file -C $HOME sysbench" "/dev/null"
             
@@ -3401,7 +3398,7 @@ install_and_distribute_sysbench() {
                 if [ "$ip" != "$local_ip" ]; then
                     echo "  Distributing to $ip..."
                     run_command "scp -q $tar_file $ip:$HOME/" "/dev/null"
-                    run_command "ssh -q $ip 'rm -rf \$HOME/sysbench && mkdir -p \$HOME/sysbench && tar -xzf \$HOME/vb_benchmark.tar.gz -C \$HOME && rm -f \$HOME/vb_benchmark.tar.gz && chmod +x \$HOME/sysbench/vb_benchmark && echo '\''export PATH=\$PATH:\$HOME/sysbench/bin'\'' >> ~/.bashrc && source ~/.bashrc && sysbench --version'" "/dev/null"
+                    run_command "ssh -q $ip 'rm -rf \$HOME/oscheckperf && mkdir -p \$HOME/oscheckperf && tar -xzf \$HOME/oscheckperf.tar.gz -C \$HOME && rm -f \$HOME/oscheckperf.tar.gz && chmod +x \$HOME/oscheckperf/oscheckperf && echo '\''export PATH=\$PATH:\$HOME/oscheckperf/bin'\'' >> ~/.bashrc && source ~/.bashrc && sysbench --version'" "/dev/null"
                     echo "  ✓ Successfully distributed to $ip"
                 fi
             done
@@ -3415,9 +3412,9 @@ install_and_distribute_sysbench() {
         echo "[Step 4/4] Installation and distribution completed"
         echo ""
         echo "=== Distribution Summary ==="
-        echo "  Sysbench installed at: $sysbench_dir"
+        echo "  Oscheckperf installed at: $sysbench_dir"
         echo "  Scripts and tools copied:"
-        echo "    - $sysbench_dir/vb_benchmark"
+        echo "    - $sysbench_dir/oscheckperf"
         echo "  Target servers:"
         for ip in "${target_servers[@]}"; do
             echo "    - $ip"
@@ -3439,24 +3436,24 @@ install_and_distribute_sysbench() {
             
             # Compile sysbench
             echo "  Compiling sysbench..."
-            run_command "tar -zxf tools/sysbench-1.0.20.tar.gz && cd sysbench-1.0.20 && ./autogen.sh && ./configure --without-mysql --prefix=\$HOME/sysbench && make && make install" "/dev/null"
+            run_command "tar -zxf tools/oscheckperf-1.0.20.tar.gz && cd sysbench-1.0.20 && ./autogen.sh && ./configure --without-mysql --prefix=\$HOME/oscheckperf && make && make install" "/dev/null"
             
             # Configure environment
             echo "  Configuring environment variables..."
-            run_command "echo 'export PATH=\$PATH:\$HOME/sysbench/bin' >> ~/.bashrc && source ~/.bashrc" "/dev/null"
+            run_command "echo 'export PATH=\$PATH:\$HOME/oscheckperf/bin' >> ~/.bashrc && source ~/.bashrc" "/dev/null"
             
             # Cleanup source directory
             run_command "rm -rf sysbench-1.0.20" "/dev/null"
             
             # Verify installation
             if [ -d "$sysbench_dir" ]; then
-                echo "  ✓ sysbench compiled and installed successfully"
+                echo "  ✓ oscheckperf compiled and installed successfully"
             else
-                echo "  ✗ sysbench compilation failed"
+                echo "  ✗ oscheckperf compilation failed"
                 return 1
             fi
         else
-            echo "  ✓ sysbench directory already exists: $sysbench_dir"
+            echo "  ✓ oscheckperf directory already exists: $sysbench_dir"
         fi
     fi
 }
