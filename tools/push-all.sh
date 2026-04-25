@@ -2,9 +2,9 @@
 
 # push-all.sh - 一键推送到Gitee和GitHub两个代码库
 # 用法:
-#   ./push-all.sh                    # 自动生成commit信息并推送
-#   ./push-all.sh "commit message"   # 使用自定义commit信息并推送
-#   ./push-all.sh "msg" "v1.2.3"    # 使用自定义commit信息和版本号
+#   ./push-all.sh                    # 自动生成commit信息并推送（VERSION.md更新日期和内容，版本号留空）
+#   ./push-all.sh "commit message"   # 使用自定义commit信息并推送（VERSION.md更新日期和内容，版本号留空）
+#   ./push-all.sh "msg" "v1.2.3"    # 使用自定义commit信息和版本号（VERSION.md完整更新）
 
 set -e
 
@@ -60,49 +60,22 @@ echo ""
 # 执行git add和commit
 echo -e "${YELLOW}正在提交变更...${NC}"
 
-# 更新版本记录
+# 更新VERSION.md（日期和内容每次都更新，版本号仅自定义时更新）
 echo -e "${YELLOW}正在更新版本记录...${NC}"
 VERSION_FILE="tools/VERSION.md"
 
-if [ -n "$CUSTOM_VERSION" ]; then
-    # 使用自定义版本号
-    NEW_VERSION="$CUSTOM_VERSION"
-    echo -e "${YELLOW}使用自定义版本号: $NEW_VERSION${NC}"
-else
-    # 自动递增版本号
-    if [ -f "$VERSION_FILE" ]; then
-        # 读取最新版本号（第一行数据）
-        CURRENT_VERSION=$(grep -E '^\| [v0-9]' "$VERSION_FILE" | head -1 | awk -F '|' '{print $2}' | tr -d ' ')
-    else
-        CURRENT_VERSION="v0.0.0"
-    fi
-
-    # 移除 v 前缀用于计算
-    VER="${CURRENT_VERSION#v}"
-
-    # 递增第三位版本号 (0.5.6 -> 0.5.7)
-    IFS='.' read -r major minor patch <<< "$VER"
-    patch=$((patch + 1))
-    if [ $patch -ge 10 ]; then
-        patch=0
-        minor=$((minor + 1))
-        if [ $minor -ge 10 ]; then
-            minor=0
-            major=$((major + 1))
-        fi
-    fi
-
-    # 保持原版本号格式（是否有 v 前缀）
-    if [[ "$CURRENT_VERSION" == v* ]]; then
-        NEW_VERSION="v$major.$minor.$patch"
-    else
-        NEW_VERSION="$major.$minor.$patch"
-    fi
-fi
-
 # 生成版本记录（使用单行摘要）
 COMMIT_SUMMARY=$(echo "$COMMIT_MSG" | head -1)
-VERSION_ENTRY="| $NEW_VERSION | $(date +"%Y-%m-%d") | $COMMIT_SUMMARY |"
+DATE=$(date +"%Y-%m-%d")
+
+# 版本号：仅自定义时更新
+if [ -n "$CUSTOM_VERSION" ]; then
+    NEW_VERSION="$CUSTOM_VERSION"
+    VERSION_ENTRY="| $NEW_VERSION | $DATE | $COMMIT_SUMMARY |"
+    echo -e "${YELLOW}使用自定义版本号: $NEW_VERSION${NC}"
+else
+    VERSION_ENTRY="|        | $DATE | $COMMIT_SUMMARY |"
+fi
 
 # 添加到版本记录文件
 if [ -f "$VERSION_FILE" ]; then
@@ -127,7 +100,7 @@ $VERSION_ENTRY
 EOF
 fi
 
-echo -e "${GREEN}✓ 版本记录更新完成: $NEW_VERSION${NC}"
+echo -e "${GREEN}✓ 版本记录更新完成${NC}"
 
 git add -A
 

@@ -2225,6 +2225,7 @@ generate_report() {
     printf -- "  Tool: ${IO_TOOL:-sysbench}\n" >> "$report_file"
     printf -- "  File Size: ${IO_TOTAL_SIZE:-1G}\n" >> "$report_file"
     printf -- "  Test Mode: ${IO_TEST_MODE:-rndrw}\n" >> "$report_file"
+    printf -- "  Test Path: ${IO_TEST_PATH:-$HOME/oscheckperf/io_test}\n" >> "$report_file"
     printf -- "  Duration: $(if [ "${IO_TOOL:-sysbench}" = "fio" ]; then echo "${FIO_DURATION:-$unified_duration}s"; else echo "${unified_duration}s"; fi)\n" >> "$report_file"
     printf -- "\n" >> "$report_file"
     printf -- "[Network Test]\n" >> "$report_file"
@@ -2427,14 +2428,17 @@ EOF
                 # Multiple servers - show comparison table
                 echo "  IO Test Comparison (Multiple Servers)" >> "$report_file"
                 echo "  =====================================" >> "$report_file"
-                printf "  %-20s %-15s %-15s %-15s %-15s\n" "Server IP" "Read IOPS" "Write IOPS" "Total IOPS" "Avg Latency (ms)" >> "$report_file"
-                echo "  ------------------------------------" >> "$report_file"
+                printf "  %-20s %-12s %-12s %-12s %-12s %-12s %-12s %-15s\n" "Server IP" "Read IOPS" "Write IOPS" "Total IOPS" "Read BW" "Write BW" "Total BW" "Avg Latency (ms)" >> "$report_file"
+                echo "  ----------------------------------------------------------------------------------------------" >> "$report_file"
                 
                 local in_io_section=false
                 local current_server_ip=""
                 local current_read_iops=""
                 local current_write_iops=""
                 local current_total_iops=""
+                local current_read_bw=""
+                local current_write_bw=""
+                local current_total_bw=""
                 local current_avg_lat=""
                 
                 while IFS= read -r line; do
@@ -2445,13 +2449,21 @@ EOF
                             else
                                 current_total_iops="N/A"
                             fi
-                            printf "  %-20s %-15s %-15s %-15s %-15s\n" "$current_server_ip" "${current_read_iops:-N/A}" "${current_write_iops:-N/A}" "${current_total_iops:-N/A}" "${current_avg_lat:-N/A}" >> "$report_file"
+                            if [ -n "$current_read_bw" ] && [ -n "$current_write_bw" ]; then
+                                current_total_bw=$(awk "BEGIN {printf \"%.2f\", $current_read_bw + $current_write_bw}" 2>/dev/null || echo "N/A")
+                            else
+                                current_total_bw="N/A"
+                            fi
+                            printf "  %-20s %-12s %-12s %-12s %-12s %-12s %-12s %-15s\n" "$current_server_ip" "${current_read_iops:-N/A}" "${current_write_iops:-N/A}" "${current_total_iops:-N/A}" "${current_read_bw:-N/A}" "${current_write_bw:-N/A}" "${current_total_bw:-N/A}" "${current_avg_lat:-N/A}" >> "$report_file"
                         fi
                         in_io_section=true
                         current_server_ip=$(echo "$line" | grep -oP 'Server: \K[0-9.]+' || echo "N/A")
                         current_read_iops=""
                         current_write_iops=""
                         current_total_iops=""
+                        current_read_bw=""
+                        current_write_bw=""
+                        current_total_bw=""
                         current_avg_lat=""
                         expect_avg_lat=false
                     elif [ "$in_io_section" = true ]; then
@@ -2462,6 +2474,10 @@ EOF
                             current_write_iops=$(echo "$line" | awk '{print $NF}')
                         elif [[ "$line" =~ "total/s:" ]]; then
                             current_total_iops=$(echo "$line" | awk '{print $NF}')
+                        elif [[ "$line" =~ "read, MiB/s:" ]]; then
+                            current_read_bw=$(echo "$line" | awk '{print $NF}')
+                        elif [[ "$line" =~ "written, MiB/s:" ]]; then
+                            current_write_bw=$(echo "$line" | awk '{print $NF}')
                         elif $expect_avg_lat && [[ "$line" =~ "avg:" ]]; then
                             current_avg_lat=$(echo "$line" | awk '{print $NF}' | tr -d ',')
                             expect_avg_lat=false
@@ -2474,7 +2490,10 @@ EOF
                     if [ -n "$current_read_iops" ] && [ -n "$current_write_iops" ]; then
                         current_total_iops=$(awk "BEGIN {printf \"%.2f\", $current_read_iops + $current_write_iops}" 2>/dev/null || echo "N/A")
                     fi
-                    printf "  %-20s %-15s %-15s %-15s %-15s\n" "$current_server_ip" "${current_read_iops:-N/A}" "${current_write_iops:-N/A}" "${current_total_iops:-N/A}" "${current_avg_lat:-N/A}" >> "$report_file"
+                    if [ -n "$current_read_bw" ] && [ -n "$current_write_bw" ]; then
+                        current_total_bw=$(awk "BEGIN {printf \"%.2f\", $current_read_bw + $current_write_bw}" 2>/dev/null || echo "N/A")
+                    fi
+                    printf "  %-20s %-12s %-12s %-12s %-12s %-12s %-12s %-15s\n" "$current_server_ip" "${current_read_iops:-N/A}" "${current_write_iops:-N/A}" "${current_total_iops:-N/A}" "${current_read_bw:-N/A}" "${current_write_bw:-N/A}" "${current_total_bw:-N/A}" "${current_avg_lat:-N/A}" >> "$report_file"
                 fi
             else
                 # Single server - show results directly
