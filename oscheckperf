@@ -231,7 +231,7 @@ show_help() {
     echo "IO test parameters:"
     echo "  IO_TOOL=sysbench|fio        IO test tool (default: sysbench)"
     echo "  IO_TOTAL_SIZE=<size>        Total file size for IO test (default: 1G)"
-    echo "  IO_TEST_MODE=<mode>         Test mode: rndrw|read|write (default: rndrw)"
+    echo "  IO_TEST_MODE=<mode>         Test mode: seqwr|seqrewr|seqrd|rndrd|rndwr|rndrw (default: rndrw)"
     echo "  IO_FILE_NUM=<number>        Number of test files (default: 1)"
     echo "  IO_TEST_PATH=<path>         Test directory path (default: \$HOME/oscheckperf/io_test)"
     echo "  FIO_DURATION=<seconds>      fio test duration (default: same as DURATION)"
@@ -729,6 +729,16 @@ run_sysbench_fileio() {
     # Save current directory
     local current_dir="$(pwd)"
     
+    # Validate IO_TEST_MODE
+    local valid_modes="seqwr seqrewr seqrd rndrd rndwr rndrw"
+    local test_mode="${IO_TEST_MODE:-rndrw}"
+    
+    if [[ ! " $valid_modes " =~ " $test_mode " ]]; then
+        echo "❌ Invalid IO_TEST_MODE: $test_mode"
+        echo "  Valid modes: $valid_modes"
+        return 1
+    fi
+    
     # Change to test directory
     cd "$test_dir" || {
         echo "❌ Failed to change to test directory: $test_dir"
@@ -736,26 +746,37 @@ run_sysbench_fileio() {
     }
     
     # Prepare test files first
-    run_command "sysbench fileio \
-        --file-total-size=\"${IO_TOTAL_SIZE:-1G}\" \
-        --file-test-mode=\"${IO_TEST_MODE:-rndrw}\" \
-        --file-num=\"${IO_FILE_NUM:-1}\" \
-        prepare" "/dev/null"
+    sysbench fileio \
+        --file-total-size="${IO_TOTAL_SIZE:-1G}" \
+        --file-test-mode="$test_mode" \
+        --file-num="${IO_FILE_NUM:-1}" \
+        prepare > "/dev/null" 2>&1
+    local prepare_exit=$?
+    if [ "$prepare_exit" -ne 0 ]; then
+        echo "❌ Prepare command failed"
+        return 1
+    fi
     
     # Run test
-    run_command "sysbench fileio \
-        --file-total-size=\"${IO_TOTAL_SIZE:-1G}\" \
-        --file-test-mode=\"${IO_TEST_MODE:-rndrw}\" \
-        --time=\"${IO_DURATION:-120}\" \
-        --file-num=\"${IO_FILE_NUM:-1}\" \
-        run" "$temp_output_file"
+    sysbench fileio \
+        --file-total-size="${IO_TOTAL_SIZE:-1G}" \
+        --file-test-mode="$test_mode" \
+        --time="${IO_DURATION:-120}" \
+        --file-num="${IO_FILE_NUM:-1}" \
+        run > "$temp_output_file" 2>&1
+    local run_exit=$?
+    if [ "$run_exit" -ne 0 ]; then
+        echo "❌ Run command failed"
+        cat "$temp_output_file"
+        return 1
+    fi
     
     # Cleanup test files
-    run_command "sysbench fileio \
-        --file-total-size=\"${IO_TOTAL_SIZE:-1G}\" \
-        --file-test-mode=\"${IO_TEST_MODE:-rndrw}\" \
-        --file-num=\"${IO_FILE_NUM:-1}\" \
-        cleanup" "/dev/null"
+    sysbench fileio \
+        --file-total-size="${IO_TOTAL_SIZE:-1G}" \
+        --file-test-mode="$test_mode" \
+        --file-num="${IO_FILE_NUM:-1}" \
+        cleanup > "/dev/null" 2>&1
     
     # Change back to original directory
     cd "$current_dir" || true
