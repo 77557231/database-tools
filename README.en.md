@@ -174,7 +174,7 @@ Multi-machine installation (direct IP list):
 ### 4. View Reports
 ```bash
 ls -lh output/
-cat output/report_benchmark_*.txt
+cat output/report_benchmark_*.log
 ```
 
 ## Output Metrics

@@ -267,14 +267,6 @@ show_help() {
     echo "  $0 io IO_TOOL=fio"
     echo "  $0 network -f servers.txt NETWORK_MODE=matrix"
     echo ""
-    echo ""
-    echo "Project structure:"
-    echo "  oscheckperf/"
-    echo "  ├── output/                   Test results output directory"
-    echo "  ├── tools/"
-    echo "  │   └── skill.md              Development documentation"
-    echo "  ├── README.md                 Documentation (Chinese)"
-    echo "  └── README.en.md              Documentation (English)"
 }
 
 # Check if command exists
@@ -2161,7 +2153,7 @@ run_pgbench_test() {
 
 # Generate report
 generate_report() {
-    local report_file="$OUTPUT_DIR/report_benchmark_${TIMESTAMP}.txt"
+    local report_file="$OUTPUT_DIR/report_benchmark_${TIMESTAMP}.log"
     local combined_file="$OUTPUT_DIR/original_data_${TIMESTAMP}_all_results.log"
     
     # Fallback to data file if original doesn't exist
@@ -2206,7 +2198,6 @@ generate_report() {
     printf -- "Hostname: ${HOSTNAME:-N/A}\n" >> "$report_file"
     printf -- "CPU Cores: ${cpu_cores}\n" >> "$report_file"
     printf -- "Memory Size: ${memory_mb} MB\n" >> "$report_file"
-    printf -- "Config File: ${CONFIG_FILE:-N/A}\n" >> "$report_file"
     printf -- "Unified Duration: ${unified_duration}s\n" >> "$report_file"
     if [ -n "$server_info" ]; then
         echo -e "$server_info" >> "$report_file"
@@ -2232,7 +2223,7 @@ generate_report() {
     printf -- "[IO Test]\n" >> "$report_file"
     printf -- "  Enabled: ${IO_ENABLED:-true}\n" >> "$report_file"
     printf -- "  Tool: ${IO_TOOL:-sysbench}\n" >> "$report_file"
-    printf -- "  File Size: ${IO_TOTAL_SIZE:-100M}\n" >> "$report_file"
+    printf -- "  File Size: ${IO_TOTAL_SIZE:-1G}\n" >> "$report_file"
     printf -- "  Test Mode: ${IO_TEST_MODE:-rndrw}\n" >> "$report_file"
     printf -- "  Duration: $(if [ "${IO_TOOL:-sysbench}" = "fio" ]; then echo "${FIO_DURATION:-$unified_duration}s"; else echo "${unified_duration}s"; fi)\n" >> "$report_file"
     printf -- "\n" >> "$report_file"
@@ -2462,16 +2453,18 @@ EOF
                         current_write_iops=""
                         current_total_iops=""
                         current_avg_lat=""
+                        expect_avg_lat=false
                     elif [ "$in_io_section" = true ]; then
                         if [[ "$line" =~ "reads/s:" ]]; then
                             current_read_iops=$(echo "$line" | awk '{print $NF}')
+                            expect_avg_lat=true
                         elif [[ "$line" =~ "writes/s:" ]]; then
                             current_write_iops=$(echo "$line" | awk '{print $NF}')
                         elif [[ "$line" =~ "total/s:" ]]; then
                             current_total_iops=$(echo "$line" | awk '{print $NF}')
-                        elif [[ "$line" =~ "Latency (ms):" ]]; then
-                            # Skip the header line
-                            :
+                        elif $expect_avg_lat && [[ "$line" =~ "avg:" ]]; then
+                            current_avg_lat=$(echo "$line" | awk '{print $NF}' | tr -d ',')
+                            expect_avg_lat=false
                         fi
                     fi
                 done < "$combined_file"
@@ -2489,7 +2482,7 @@ EOF
                 local io_write_iops=$(grep "writes/s:" "$combined_file" 2>/dev/null | awk '{print $NF}')
                 local io_read_bw=$(grep "read, MiB/s:" "$combined_file" 2>/dev/null | awk '{print $NF}')
                 local io_write_bw=$(grep "written, MiB/s:" "$combined_file" 2>/dev/null | awk '{print $NF}')
-                local io_avg_lat=$(grep "avg:" "$combined_file" 2>/dev/null | tail -1 | awk '{print $NF}' | tr -d ',')
+                local io_avg_lat=$(grep "avg:" "$combined_file" 2>/dev/null | head -1 | awk '{print $NF}' | tr -d ',')
 
                 if [ -n "$io_read_iops" ]; then
                     local io_total_iops=$(awk "BEGIN {printf \"%.2f\", $io_read_iops + $io_write_iops}" 2>/dev/null || echo "N/A")
@@ -3309,13 +3302,13 @@ main() {
         
         echo ""
         echo "=== Benchmark completed successfully! ==="
-        echo "Report: $OUTPUT_DIR/report_benchmark_${TIMESTAMP}.txt"
+        echo "Report: $OUTPUT_DIR/report_benchmark_${TIMESTAMP}.log"
         echo "Detailed results: $OUTPUT_DIR/data_${TIMESTAMP}_all_results.log"
         echo "Original data: $OUTPUT_DIR/original_data_${TIMESTAMP}_all_results.log"
     fi
 }
 
-# Install and distribute sysbench to target servers
+# Install and distribute oscheckperf to target servers
 install_and_distribute_sysbench() {
     local local_ip=$(get_machine_ip)
     local sysbench_dir="$HOME/oscheckperf"
@@ -3395,8 +3388,8 @@ install_and_distribute_sysbench() {
             fi
         fi
         
-        # Copy oscheckperf script and tools to oscheckperf directory
-        echo "[Step 2/4] Copying oscheckperf script and tools..."
+        # Copy oscheckperf script to oscheckperf directory (main script first)
+        echo "[Step 2/4] Copying oscheckperf script..."
         if [ -f "$benchmark_dir/oscheckperf" ]; then
             if cp "$benchmark_dir/oscheckperf" "$sysbench_dir/" 2>/dev/null; then
                 chmod +x "$sysbench_dir/oscheckperf"
@@ -3409,55 +3402,64 @@ install_and_distribute_sysbench() {
             return 1
         fi
         
-        # Copy tools directory if exists
-        if [ -d "$benchmark_dir/tools" ]; then
-            if cp -r "$benchmark_dir/tools" "$sysbench_dir/" 2>/dev/null; then
-                echo "  ✓ Copied tools directory to $sysbench_dir/"
-            else
-                echo "  ⚠️  Failed to copy tools directory to $sysbench_dir/, continuing anyway"
-            fi
-        fi
-        
         # Distribute to other servers if oscheckperf directory exists
         if [ -d "$sysbench_dir" ]; then
             echo "[Step 3/4] Distributing to target servers..."
             echo "  Server list: ${target_servers[*]}"
-            
-            # Create tar package
-            local tar_file="$HOME/oscheckperf.tar.gz"
-            echo "  Creating tar package: $tar_file"
-            if ! run_command "tar -czf $tar_file -C $HOME oscheckperf" "/dev/null"; then
-                echo "  ⚠️  Failed to create tar package, skipping distribution"
-                return 0
-            fi
             
             # SCP to each server except local machine
             local distribute_success=true
             for ip in "${target_servers[@]}"; do
                 if [ "$ip" != "$local_ip" ]; then
                     echo "  Distributing to $ip..."
-                    if run_command "scp -q $tar_file $ip:$HOME/" "/dev/null"; then
-                        # Create a temporary file to capture SSH output
-                        local ssh_output=$(mktemp)
-                        if run_command "ssh $ip 'rm -rf \$HOME/oscheckperf && mkdir -p \$HOME/oscheckperf && tar -xzf \$HOME/oscheckperf.tar.gz -C \$HOME && rm -f \$HOME/oscheckperf.tar.gz && chmod +x \$HOME/oscheckperf/oscheckperf && if ! grep -q \"oscheckperf/bin\" ~/.bashrc; then echo '\''export PATH=\$PATH:\$HOME/oscheckperf/bin'\'' >> ~/.bashrc; fi && source ~/.bashrc && sysbench --version'" "$ssh_output"; then
-                            echo "  ✓ Successfully distributed to $ip"
+                    # Check if remote oscheckperf directory exists
+                    if run_command "ssh $ip 'test -d \$HOME/oscheckperf'" "/dev/null"; then
+                        # oscheckperf directory exists, only distribute main script
+                        echo "  oscheckperf directory exists on $ip, only distributing main script"
+                        if run_command "scp -q $sysbench_dir/oscheckperf $ip:\$HOME/oscheckperf/" "/dev/null"; then
+                            # Set executable permission
+                            if run_command "ssh $ip 'chmod +x \$HOME/oscheckperf/oscheckperf'" "/dev/null"; then
+                                echo "  ✓ Successfully distributed oscheckperf script to $ip"
+                            else
+                                echo "  ✗ Failed to set permissions on $ip"
+                                distribute_success=false
+                            fi
                         else
-                            echo "  ✗ Failed to distribute to $ip: SSH command failed"
-                            echo "  SSH output:"
-                            cat "$ssh_output"
+                            echo "  ✗ Failed to distribute oscheckperf script to $ip"
                             distribute_success=false
                         fi
-                        # Cleanup temporary file
-                        rm -f "$ssh_output"
                     else
-                        echo "  ✗ Failed to distribute to $ip: SCP failed"
-                        distribute_success=false
+                        # oscheckperf directory doesn't exist, distribute entire directory
+                        echo "  oscheckperf directory doesn't exist on $ip, distributing entire directory"
+                        # Create tar package
+                        local tar_file="$HOME/oscheckperf.tar.gz"
+                        if run_command "tar -czf $tar_file -C $HOME oscheckperf" "/dev/null"; then
+                            if run_command "scp -q $tar_file $ip:$HOME/" "/dev/null"; then
+                                # Create a temporary file to capture SSH output
+                                local ssh_output=$(mktemp)
+                                if run_command "ssh $ip 'rm -rf \$HOME/oscheckperf && mkdir -p \$HOME/oscheckperf && tar -xzf \$HOME/oscheckperf.tar.gz -C \$HOME && rm -f \$HOME/oscheckperf.tar.gz && chmod +x \$HOME/oscheckperf/oscheckperf && if ! grep -q \"oscheckperf/bin\" ~/.bashrc; then echo '\''export PATH=\$PATH:\$HOME/oscheckperf/bin'\'' >> ~/.bashrc; fi && source ~/.bashrc && sysbench --version'" "$ssh_output"; then
+                                    echo "  ✓ Successfully distributed to $ip"
+                                else
+                                    echo "  ✗ Failed to distribute to $ip: SSH command failed"
+                                    echo "  SSH output:"
+                                    cat "$ssh_output"
+                                    distribute_success=false
+                                fi
+                                # Cleanup temporary file
+                                rm -f "$ssh_output"
+                            else
+                                echo "  ✗ Failed to distribute to $ip: SCP failed"
+                                distribute_success=false
+                            fi
+                            # Cleanup tar file
+                            run_command "rm -f $tar_file" "/dev/null"
+                        else
+                            echo "  ✗ Failed to create tar package, skipping distribution to $ip"
+                            distribute_success=false
+                        fi
                     fi
                 fi
             done
-            
-            # Cleanup tar file
-            run_command "rm -f $tar_file" "/dev/null"
             
             if [ "$distribute_success" = "true" ]; then
                 echo "  ✓ All files distributed to all target servers"
