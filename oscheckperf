@@ -2276,6 +2276,7 @@ generate_report() {
                 echo "  --------------------------------------" >> "$report_file"
                 
                 local in_cpu_section=false
+                local in_cpu_latency=false
                 local current_server_ip=""
                 local current_eps=""
                 local current_avg_lat=""
@@ -2287,17 +2288,29 @@ generate_report() {
                             printf "  %-20s %-15s %-15s %-15s\n" "$current_server_ip" "${current_eps:-N/A}" "${current_avg_lat:-N/A}" "${current_p95_lat:-N/A}" >> "$report_file"
                         fi
                         in_cpu_section=true
+                        in_cpu_latency=false
                         current_server_ip=$(echo "$line" | grep -oP 'Server: \K[0-9.]+' || echo "N/A")
                         current_eps=""
                         current_avg_lat=""
                         current_p95_lat=""
+                    elif [ "$in_cpu_section" = true ] && [[ "$line" =~ "MEMORY TEST RESULTS" || "$line" =~ "SYSBENCH FILEIO TEST RESULTS" || "$line" =~ "THREADS TEST RESULTS" || "$line" =~ "MUTEX TEST RESULTS" || "$line" =~ "NETWORK TEST RESULTS" ]]; then
+                        # End of CPU section
+                        if [ -n "$current_server_ip" ]; then
+                            printf "  %-20s %-15s %-15s %-15s\n" "$current_server_ip" "${current_eps:-N/A}" "${current_avg_lat:-N/A}" "${current_p95_lat:-N/A}" >> "$report_file"
+                        fi
+                        in_cpu_section=false
+                        in_cpu_latency=false
                     elif [ "$in_cpu_section" = true ]; then
                         if [[ "$line" =~ "events per second:" ]]; then
                             current_eps=$(echo "$line" | awk '{print $NF}')
-                        elif [[ "$line" =~ "avg:" ]] && [[ "$line" =~ [0-9] ]] && [[ ! "$line" =~ "events (avg/stddev):" ]] && [[ ! "$line" =~ "execution time" ]]; then
+                        elif [[ "$line" =~ "Latency (ms):" ]]; then
+                            in_cpu_latency=true
+                        elif [ "$in_cpu_latency" = true ] && [[ "$line" =~ "avg:" ]]; then
                             current_avg_lat=$(echo "$line" | awk '{print $NF}')
-                        elif [[ "$line" =~ "95th percentile:" ]]; then
+                        elif [ "$in_cpu_latency" = true ] && [[ "$line" =~ "95th percentile:" ]]; then
                             current_p95_lat=$(echo "$line" | awk '{print $NF}')
+                        elif [[ "$line" =~ "Threads fairness:" ]]; then
+                            in_cpu_latency=false
                         fi
                     fi
                 done < "$combined_file"
@@ -2356,6 +2369,7 @@ EOF
                 echo "  ----------------------------------------" >> "$report_file"
                 
                 local in_mem_section=false
+                local in_mem_latency=false
                 local current_server_ip=""
                 local current_ops_sec=""
                 local current_mib_sec=""
@@ -2367,17 +2381,29 @@ EOF
                             printf "  %-20s %-15s %-15s %-15s\n" "$current_server_ip" "${current_ops_sec:-N/A}" "${current_mib_sec:-N/A}" "${current_mem_avg_lat:-N/A}" >> "$report_file"
                         fi
                         in_mem_section=true
+                        in_mem_latency=false
                         current_server_ip=$(echo "$line" | grep -oP 'Server: \K[0-9.]+' || echo "N/A")
                         current_ops_sec=""
                         current_mib_sec=""
                         current_mem_avg_lat=""
+                    elif [ "$in_mem_section" = true ] && [[ "$line" =~ "SYSBENCH FILEIO TEST RESULTS" || "$line" =~ "THREADS TEST RESULTS" || "$line" =~ "MUTEX TEST RESULTS" || "$line" =~ "NETWORK TEST RESULTS" || "$line" =~ "CPU TEST RESULTS" ]]; then
+                        # End of Memory section
+                        if [ -n "$current_server_ip" ]; then
+                            printf "  %-20s %-15s %-15s %-15s\n" "$current_server_ip" "${current_ops_sec:-N/A}" "${current_mib_sec:-N/A}" "${current_mem_avg_lat:-N/A}" >> "$report_file"
+                        fi
+                        in_mem_section=false
+                        in_mem_latency=false
                     elif [ "$in_mem_section" = true ]; then
                         if [[ "$line" =~ "Total operations:" ]]; then
                             current_ops_sec=$(echo "$line" | awk -F'[()]' '{print $2}' | awk '{print $1}')
                         elif [[ "$line" =~ "MiB transferred" ]]; then
                             current_mib_sec=$(echo "$line" | awk -F'[()]' '{print $2}' | awk '{print $1}')
-                        elif [[ "$line" =~ "avg:" ]]; then
+                        elif [[ "$line" =~ "Latency (ms):" ]]; then
+                            in_mem_latency=true
+                        elif [ "$in_mem_latency" = true ] && [[ "$line" =~ "avg:" ]]; then
                             current_mem_avg_lat=$(echo "$line" | awk '{print $NF}' | tr -d ',')
+                        elif [[ "$line" =~ "Threads fairness:" ]]; then
+                            in_mem_latency=false
                         fi
                     fi
                 done < "$combined_file"
@@ -2778,82 +2804,61 @@ EOF
             # Extract all network test results
             local found_results=false
 
-            # Get the output directory from the combined file path
-            local output_dir=$(dirname "$combined_file")
-
-            # Check for different types of network test files from current test only
-            local network_files=()
-            # Only read network test files that match the current timestamp pattern
-            if ls "$output_dir"/network/network_scenario_*_${TIMESTAMP}.json 1>/dev/null 2>&1; then
-                network_files=($(ls "$output_dir"/network/network_scenario_*_${TIMESTAMP}.json))
-            fi
-            # Also check for matrix and parallel test files from current test
-            if ls "$output_dir"/network/network_matrix_*_${TIMESTAMP}.json 1>/dev/null 2>&1; then
-                network_files+=($(ls "$output_dir"/network/network_matrix_*_${TIMESTAMP}.json))
-            fi
-            if ls "$output_dir"/network/network_parallel_*_${TIMESTAMP}.json 1>/dev/null 2>&1; then
-                network_files+=($(ls "$output_dir"/network/network_parallel_*_${TIMESTAMP}.json))
-            fi
-
-            if [ ${#network_files[@]} -gt 0 ]; then
-                # Multiple network tests - show comparison table
-                echo "  Network Test Comparison (Multiple Servers)" >> "$report_file"
-                echo "  ===========================================" >> "$report_file"
-                printf "  %-20s %-20s %-15s\n" "Client IP" "Server IP" "Bandwidth (MB/s)" >> "$report_file"
-                echo "  -------------------------------------------" >> "$report_file"
+            # Check combined file directly for network results
+            local in_network_section=false
+            local current_client_ip=""
+            local current_server_ip=""
+            local current_bandwidth=""
+            
+            # Multiple network tests - show comparison table
+            echo "  Network Test Comparison (Multiple Servers)" >> "$report_file"
+            echo "  ===========================================" >> "$report_file"
+            printf "  %-20s %-20s %-15s\n" "Client IP" "Server IP" "Bandwidth (MB/s)" >> "$report_file"
+            echo "  -------------------------------------------" >> "$report_file"
+            
+            # Read the entire file content
+            local file_content=$(cat "$combined_file")
+            
+            # Extract all network test sections
+            local network_sections=$(echo "$file_content" | grep -n "NETWORK TEST RESULTS" | cut -d: -f1)
+            
+            # Process each network test section
+            for start_line in $network_sections; do
+                # Extract the section content
+                local section_content=$(echo "$file_content" | sed -n "$start_line,/iperf Done/p")
                 
-                # Process each network test file
-                for json_file in "${network_files[@]}"; do
-                    local net_bw="0"
-                    local client_ip="N/A"
-                    local server_ip="N/A"
-
-                    if [ -f "$json_file" ]; then
-                        # Check if jq is installed
-                        if command -v jq &> /dev/null; then
-                            # Extract JSON content by removing any leading non-JSON text
-                            local json_content=$(awk 'BEGIN{found=0} /^\{/{found=1} found{print} /^\}/{if(found) exit}' "$json_file" 2>/dev/null || cat "$json_file")
-                            
-                            # Extract bandwidth from JSON content
-                            local bandwidth_bps=$(echo "$json_content" | jq -r '.end.sum_received.bits_per_second // 0' 2>/dev/null)
-                            # Convert bps to MB/s: 1 MB/s = 8,000,000 bps
-                            net_bw=$(awk "BEGIN {printf \"%.2f\", $bandwidth_bps / 8000000}" 2>/dev/null || echo "0")
-                            
-                            # Extract client and server IPs from the JSON content
-                            client_ip=$(echo "$json_content" | jq -r '.start.connected[0].local_host // "N/A"' 2>/dev/null)
-                            server_ip=$(echo "$json_content" | jq -r '.start.connected[0].remote_host // "N/A"' 2>/dev/null)
-                            
-                            if [ -z "$client_ip" ] || [ "$client_ip" = "null" ] || [ "$client_ip" = "N/A" ]; then
-                                # Fallback: get client IP from filename
-                                local file_name=$(basename "$json_file")
-                                client_ip=$(echo "$file_name" | grep -oP 'network_\w+_\K[0-9]+' | head -1)
-                                if [ -z "$client_ip" ]; then
-                                    client_ip="Client"
-                                else
-                                    client_ip="Client $client_ip"
-                                fi
-                            fi
-                        fi
+                # Extract client and server IPs from the line like: NETWORK TEST RESULTS (172.16.53.128 from 172.16.54.140) (Server: 172.16.53.128)
+                # Format: (server_ip from client_ip) (Server: server_ip)
+                local server_ip=$(echo "$section_content" | grep -oP '\(\K[0-9.]+(?= from )' | head -1)
+                local client_ip=$(echo "$section_content" | grep -oP 'from \K[0-9.]+(?=\) \(Server:)' | head -1)
+                
+                # Extract bandwidth from the sender line
+                local bitrate_line=$(echo "$section_content" | grep "sender" | head -1)
+                if [ -n "$bitrate_line" ]; then
+                    # Extract bitrate and unit (e.g., "972 Mbits/sec")
+                    # Split the line into fields
+                    local fields=($bitrate_line)
+                    local bitrate=${fields[6]}
+                    local unit=${fields[7]}
+                    
+                    if [ "$unit" = "Mbits/sec" ]; then
+                        local bandwidth=$(awk "BEGIN {printf \"%.2f\", $bitrate / 8}" 2>/dev/null || echo "N/A")
+                    elif [ "$unit" = "Gbits/sec" ]; then
+                        local bandwidth=$(awk "BEGIN {printf \"%.2f\", $bitrate * 125}" 2>/dev/null || echo "N/A")
+                    else
+                        local bandwidth="N/A"
                     fi
                     
                     # Display the result
-                    if [ "$server_ip" != "N/A" ] && [ "$server_ip" != "null" ]; then
-                        echo "  $client_ip -> $server_ip: ${net_bw} MB/s"
-                        printf "  %-20s %-20s %-15s\n" "$client_ip" "$server_ip" "${net_bw}" >> "$report_file"
-                    else
-                        echo "  $client_ip: ${net_bw} MB/s"
-                        printf "  %-20s %-20s %-15s\n" "$client_ip" "N/A" "${net_bw}" >> "$report_file"
+                    if [ -n "$client_ip" ] && [ -n "$server_ip" ]; then
+                        printf "  %-20s %-20s %-15s\n" "$client_ip" "$server_ip" "${bandwidth:-N/A}" >> "$report_file"
+                        found_results=true
                     fi
-                    found_results=true
-                done
-            else
-                # No JSON files found, check combined file directly
-                echo "  Test executed but no detailed results available" >> "$report_file"
-                found_results=true
-            fi
+                fi
+            done
             
             if [ "$found_results" = false ]; then
-                echo "  Test not executed or no results found" >> "$report_file"
+                echo "  Test executed but no detailed results available" >> "$report_file"
             fi
         else
             echo "  Test not executed" >> "$report_file"
