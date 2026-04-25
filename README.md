@@ -195,7 +195,7 @@ sudo apt-get install -y sysbench fio iperf3 jq
 
 ```bash
 ls -lh output/
-cat output/report_benchmark_*.txt
+cat output/report_benchmark_*.log
 ```
 
 

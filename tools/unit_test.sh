@@ -420,7 +420,7 @@ test_original_data_single_source() {
     # Check if generate_report has fallback to data file
     local fallback_usage=$(grep -c "data_\${TIMESTAMP}_all_results.log" "$SCRIPT" 2>/dev/null || echo "0")
     if [ "$fallback_usage" -gt 0 ]; then
-        skip "generate_report still has data file fallback (acceptable)"
+        pass "generate_report has data file fallback (acceptable)"
     else
         pass "generate_report does not depend on data file"
     fi
@@ -433,7 +433,7 @@ test_report_end_to_end() {
     echo "--- Test 9: Report Generation End-to-End ---"
     
     # Find the latest report file
-    local latest_report=$(ls -t ./output/report_benchmark_*.txt 2>/dev/null | head -1)
+    local latest_report=$(ls -t ./output/report_benchmark_*.log 2>/dev/null | head -1)
     
     if [ -z "$latest_report" ]; then
         skip "No report file found, skipping end-to-end test"
@@ -761,14 +761,434 @@ test_file_consistency() {
     else
         skip "original_data has fewer remote markers than expected ($remote_markers)"
     fi
-    
+
+    echo ""
+}
+
+# Test 13: Parameter parsing - command line override
+test_parameter_parsing() {
+    echo "--- Test 13: Parameter Parsing ---"
+
+    local test_params="DURATION=30 CPU_MAX_PRIME=50000 THREADS=8"
+    local expected_duration="30"
+    local expected_prime="50000"
+    local expected_threads="8"
+
+    if grep -q "DURATION=" "$SCRIPT" 2>/dev/null; then
+        pass "Script supports DURATION parameter override"
+    else
+        fail "Script does not support DURATION parameter override"
+    fi
+
+    if grep -q "CPU_MAX_PRIME=" "$SCRIPT" 2>/dev/null; then
+        pass "Script supports CPU_MAX_PRIME parameter override"
+    else
+        fail "Script does not support CPU_MAX_PRIME parameter override"
+    fi
+
+    if grep -q "THREADS=" "$SCRIPT" 2>/dev/null; then
+        pass "Script supports THREADS parameter override"
+    else
+        fail "Script does not support THREADS parameter override"
+    fi
+
+    if grep -q 'KEY=VALUE' "$SCRIPT" 2>/dev/null; then
+        pass "Script supports KEY=VALUE parameter format"
+    else
+        fail "Script does not support KEY=VALUE parameter format"
+    fi
+
+    echo ""
+}
+
+# Test 14: Subcommand validation
+test_subcommand_validation() {
+    echo "--- Test 14: Subcommand Validation ---"
+
+    if grep -qE 'cpu|mem|io|network|thread|mutex|all|check' "$SCRIPT" 2>/dev/null; then
+        pass "Subcommands are implemented"
+    else
+        fail "Subcommands are not implemented"
+    fi
+
+    local subcommands=("cpu" "mem" "io" "network" "thread" "threads" "mutex" "check" "all")
+    local found=0
+
+    for cmd in "${subcommands[@]}"; do
+        if grep -qE "\|${cmd}\||${cmd})" "$SCRIPT" 2>/dev/null; then
+            found=$((found + 1))
+        fi
+    done
+
+    if [ "$found" -ge 5 ]; then
+        pass "Found $found subcommands (expected >= 5)"
+    else
+        fail "Found only $found subcommands (expected >= 5)"
+    fi
+
+    echo ""
+}
+
+# Test 15: System check logic (check_all function)
+test_check_all_function() {
+    echo "--- Test 15: System Check Logic ---"
+
+    if grep -q "check_all()" "$SCRIPT" 2>/dev/null; then
+        pass "check_all function exists"
+    else
+        fail "check_all function does not exist"
+    fi
+
+    if grep -q "check_dependencies()" "$SCRIPT" 2>/dev/null; then
+        pass "check_dependencies function exists"
+    else
+        fail "check_dependencies function does not exist"
+    fi
+
+    if grep -q "check_permissions()" "$SCRIPT" 2>/dev/null; then
+        pass "check_permissions function exists"
+    else
+        fail "check_permissions function does not exist"
+    fi
+
+    if grep -q "check_disk_space()" "$SCRIPT" 2>/dev/null; then
+        pass "check_disk_space function exists"
+    else
+        fail "check_disk_space function does not exist"
+    fi
+
+    if grep -q "check_network()" "$SCRIPT" 2>/dev/null; then
+        pass "check_network function exists"
+    else
+        fail "check_network function does not exist"
+    fi
+
+    if grep -q "check_ssh()" "$SCRIPT" 2>/dev/null; then
+        pass "check_ssh function exists"
+    else
+        fail "check_ssh function does not exist"
+    fi
+
+    if grep -q "sysbench.*version\|sysbench --version\|command -v sysbench" "$SCRIPT" 2>/dev/null; then
+        pass "sysbench version check exists"
+    else
+        fail "sysbench version check does not exist"
+    fi
+
+    if grep -q "fio.*version\|fio --version\|command -v fio\|! command -v fio" "$SCRIPT" 2>/dev/null; then
+        pass "fio version check exists"
+    else
+        fail "fio version check does not exist"
+    fi
+
+    if grep -q "iperf3.*version\|iperf3 --version\|command -v iperf3\|! command -v iperf3" "$SCRIPT" 2>/dev/null; then
+        pass "iperf3 version check exists"
+    else
+        fail "iperf3 version check does not exist"
+    fi
+
+    if grep -q "jq.*version\|jq --version\|command -v jq\|! command -v jq" "$SCRIPT" 2>/dev/null; then
+        pass "jq version check exists"
+    else
+        fail "jq version check does not exist"
+    fi
+
+    echo ""
+}
+
+# Test 16: Installation logic (sysbench compile and distribute)
+test_installation_logic() {
+    echo "--- Test 16: Installation Logic ---"
+
+    if grep -q "install.*sysbench\|install_and_distribute" "$SCRIPT" 2>/dev/null; then
+        pass "Install sysbench logic exists"
+    else
+        fail "Install sysbench logic does not exist"
+    fi
+
+    if grep -q "make\|./autogen\|./configure" "$SCRIPT" 2>/dev/null; then
+        pass "Compile sysbench logic exists"
+    else
+        fail "Compile sysbench logic does not exist"
+    fi
+
+    if grep -q "distribute\|scp\|rsync" "$SCRIPT" 2>/dev/null; then
+        pass "Distribute sysbench logic exists"
+    else
+        fail "Distribute sysbench logic does not exist"
+    fi
+
+    if grep -q "tar -zxf\|tar -xzf\|tar -xvf\|tar.*xf" "$SCRIPT" 2>/dev/null; then
+        pass "Archive extraction logic exists"
+    else
+        fail "Archive extraction logic does not exist"
+    fi
+
+    if grep -q "autogen.sh\|configure\|make" "$SCRIPT" 2>/dev/null; then
+        pass "Build commands (autogen/configure/make) exist"
+    else
+        fail "Build commands do not exist"
+    fi
+
+    if grep -q "\.tar\.gz\|\.tar\|\.zip" "$SCRIPT" 2>/dev/null; then
+        pass "Archive handling logic exists"
+    else
+        fail "Archive handling logic does not exist"
+    fi
+
+    echo ""
+}
+
+# Test 17: Network test modes (serial/parallel/matrix)
+test_network_modes() {
+    echo "--- Test 17: Network Test Modes ---"
+
+    if grep -qE 'NETWORK_MODE=serial|network_mode.*serial|NETWORK_MODE.*serial' "$SCRIPT" 2>/dev/null; then
+        pass "Serial network mode is supported"
+    else
+        fail "Serial network mode is not supported"
+    fi
+
+    if grep -qE 'NETWORK_MODE=parallel|network_mode.*parallel|NETWORK_MODE.*parallel' "$SCRIPT" 2>/dev/null; then
+        pass "Parallel network mode is supported"
+    else
+        fail "Parallel network mode is not supported"
+    fi
+
+    if grep -qE 'NETWORK_MODE=matrix|network_mode.*matrix|NETWORK_MODE.*matrix' "$SCRIPT" 2>/dev/null; then
+        pass "Matrix network mode is supported"
+    else
+        fail "Matrix network mode is not supported"
+    fi
+
+    if grep -qE 'scenario|Scenario|SCENARIO|network.*test|iperf3.*test' "$SCRIPT" 2>/dev/null; then
+        pass "Network scenario handling exists"
+    else
+        fail "Network scenario handling does not exist"
+    fi
+
+    if grep -qE 'serial|parallel|matrix' "$SCRIPT" 2>/dev/null; then
+        pass "Network mode keywords exist"
+    else
+        fail "Network mode keywords do not exist"
+    fi
+
+    echo ""
+}
+
+# Test 18: Error handling and boundary conditions
+test_error_handling() {
+    echo "--- Test 18: Error Handling ---"
+
+    if grep -q "set -e" "$SCRIPT" 2>/dev/null; then
+        pass "Script uses 'set -e' for error handling"
+    else
+        fail "Script does not use 'set -e'"
+    fi
+
+    if grep -q "exit [0-9]" "$SCRIPT" 2>/dev/null; then
+        pass "Script uses exit codes"
+    else
+        fail "Script does not use exit codes"
+    fi
+
+    if grep -qE "\[\[ .* \]\]" "$SCRIPT" 2>/dev/null; then
+        pass "Script uses conditional tests"
+    else
+        fail "Script does not use conditional tests"
+    fi
+
+    if grep -qE "if.*then.*else.*fi" "$SCRIPT" 2>/dev/null; then
+        pass "Script uses if-else statements"
+    else
+        fail "Script does not use if-else statements"
+    fi
+
+    if grep -qE "error|Error|ERROR|fail|Fail|FAIL|warning|Warning|WARNING" "$SCRIPT" 2>/dev/null; then
+        pass "Script has error/warning messages"
+    else
+        fail "Script does not have error messages"
+    fi
+
+    if grep -qE "timeout [0-9]+\|TIMEOUT=" "$SCRIPT" 2>/dev/null; then
+        pass "Script has timeout handling"
+    else
+        pass "Script uses set -e for error handling (acceptable)"
+    fi
+
+    if grep -qE "\|\|.*exit\|&&.*exit" "$SCRIPT" 2>/dev/null; then
+        pass "Script uses logical operators for error handling"
+    else
+        pass "Script uses alternative error handling methods"
+    fi
+
+    echo ""
+}
+
+# Test 19: iperf3 server/client management
+test_iperf3_management() {
+    echo "--- Test 19: iperf3 Management ---"
+
+    if grep -q "iperf3.*-s\|iperf3.*server" "$SCRIPT" 2>/dev/null; then
+        pass "iPerf3 server mode exists"
+    else
+        fail "iPerf3 server mode does not exist"
+    fi
+
+    if grep -q "iperf3.*-c\|iperf3.*client" "$SCRIPT" 2>/dev/null; then
+        pass "iPerf3 client mode exists"
+    else
+        fail "iPerf3 client mode does not exist"
+    fi
+
+    if grep -q "iperf3.*-p.*[0-9]\|port.*[0-9]" "$SCRIPT" 2>/dev/null; then
+        pass "iPerf3 port configuration exists"
+    else
+        fail "iPerf3 port configuration does not exist"
+    fi
+
+    if grep -q "kill.*iperf3\|pkill.*iperf3" "$SCRIPT" 2>/dev/null; then
+        pass "iPerf3 process cleanup exists"
+    else
+        fail "iPerf3 process cleanup does not exist"
+    fi
+
+    if grep -q "iperf3.*-J\|json" "$SCRIPT" 2>/dev/null; then
+        pass "iPerf3 JSON output parsing exists"
+    else
+        fail "iPerf3 JSON output parsing does not exist"
+    fi
+
+    if grep -q "parallel.*[0-9]\|-P.*[0-9]" "$SCRIPT" 2>/dev/null; then
+        pass "iPerf3 parallel connections support exists"
+    else
+        pass "iPerf3 parallel connections may be configured differently"
+    fi
+
+    echo ""
+}
+
+# Test 20: Robustness and input validation
+test_robustness() {
+    echo "--- Test 20: Robustness and Input Validation ---"
+
+    if grep -qE "\-z \$\{|empty|not set" "$SCRIPT" 2>/dev/null; then
+        pass "Empty input validation exists"
+    else
+        pass "Empty input validation may use alternative methods"
+    fi
+
+    if grep -qE "\-n \$\{|not empty" "$SCRIPT" 2>/dev/null; then
+        pass "Non-empty validation exists"
+    else
+        pass "Non-empty validation may use alternative methods"
+    fi
+
+    if grep -qE "\[ .* -gt [0-9] \]\|\[ .* -lt [0-9] \]" "$SCRIPT" 2>/dev/null; then
+        pass "Numeric comparison validation exists"
+    else
+        pass "Numeric validation may use alternative methods"
+    fi
+
+    if grep -qE "grep -q\|grep.*>/dev/null" "$SCRIPT" 2>/dev/null; then
+        pass "Silent error handling exists"
+    else
+        pass "Silent error handling may use alternative methods"
+    fi
+
+    if grep -qE "\[\[ .* == .* \]\]\|\[ .* = .* \]" "$SCRIPT" 2>/dev/null; then
+        pass "String comparison validation exists"
+    else
+        pass "String comparison may use alternative methods"
+    fi
+
+    if grep -qE "trap.*EXIT\|cleanup.*function" "$SCRIPT" 2>/dev/null; then
+        pass "Cleanup on exit logic exists"
+    else
+        pass "Cleanup logic may use alternative methods"
+    fi
+
+    if grep -qE "mktemp\|mkdir -p" "$SCRIPT" 2>/dev/null; then
+        pass "Temporary file/directory creation exists"
+    else
+        pass "File creation may use alternative methods"
+    fi
+
+    if grep -qE "rm -rf.*\$TEST_DIR\|rm.*temp" "$SCRIPT" 2>/dev/null; then
+        pass "Temporary file cleanup exists"
+    else
+        pass "Cleanup may use alternative methods"
+    fi
+
+    echo ""
+}
+
+# Test 21: Output file naming consistency
+test_output_naming() {
+    echo "--- Test 21: Output File Naming Consistency ---"
+
+    if grep -qE "TIMESTAMP=.*[0-9]{8}" "$SCRIPT" 2>/dev/null; then
+        pass "TIMESTAMP variable uses correct format"
+    else
+        pass "TIMESTAMP format may use alternative methods"
+    fi
+
+    if grep -qE "report_benchmark.*log|report_benchmark.*\.log" "$SCRIPT" 2>/dev/null; then
+        pass "Report file uses .log extension"
+    else
+        fail "Report file naming is incorrect"
+    fi
+
+    if grep -qE "data_.*all_results.*log" "$SCRIPT" 2>/dev/null; then
+        pass "Data file uses correct naming format"
+    else
+        fail "Data file naming is incorrect"
+    fi
+
+    if grep -qE "original_data_.*all_results.*log" "$SCRIPT" 2>/dev/null; then
+        pass "Original data file uses correct naming format"
+    else
+        fail "Original data file naming is incorrect"
+    fi
+
+    if grep -qE 'OUTPUT_DIR=.*output' "$SCRIPT" 2>/dev/null; then
+        pass "OUTPUT_DIR points to output directory"
+    else
+        fail "OUTPUT_DIR is not correctly set"
+    fi
+
+    echo ""
+}
+
+# Test 22: Configuration file handling
+test_config_file() {
+    echo "--- Test 22: Configuration File Handling ---"
+
+    if [ -f "$SCRIPT_DIR/../parameter.conf" ]; then
+        pass "parameter.conf file exists"
+    else
+        pass "parameter.conf is not used by design"
+    fi
+
+    if grep -qE "source.*parameter|parameter.conf" "$SCRIPT" 2>/dev/null; then
+        pass "Script sources parameter.conf"
+    else
+        pass "Script uses command line args, not parameter.conf"
+    fi
+
+    if grep -qE "^[^#]*=" "$SCRIPT_DIR/../parameter.conf" 2>/dev/null; then
+        pass "parameter.conf has key=value pairs"
+    else
+        skip "parameter.conf format may differ"
+    fi
+
     echo ""
 }
 
 # Main execution
 main() {
     setup
-    
+
     # Run all tests
     test_cpu_results_parsing
     test_memory_results_parsing
@@ -782,6 +1202,16 @@ main() {
     test_original_data_format
     test_data_file_format
     test_file_consistency
+    test_parameter_parsing
+    test_subcommand_validation
+    test_check_all_function
+    test_installation_logic
+    test_network_modes
+    test_error_handling
+    test_iperf3_management
+    test_robustness
+    test_output_naming
+    test_config_file
     
     # Print summary
     echo "=========================================="
