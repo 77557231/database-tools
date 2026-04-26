@@ -4,7 +4,7 @@
 # 用法:
 #   ./push-all.sh                    # 自动生成commit信息并推送（VERSION.md更新日期和内容，版本号留空）
 #   ./push-all.sh "commit message"   # 使用自定义commit信息并推送（VERSION.md更新日期和内容，版本号留空）
-#   ./push-all.sh "msg" "v1.2.3"    # 使用自定义commit信息和版本号（VERSION.md完整更新）
+#   ./push-all.sh "msg" "v1.2.3"    # 使用自定义commit信息和版本号（VERSION.md完整更新，自动更新oscheckperf版本）
 
 set -e
 
@@ -23,6 +23,28 @@ echo ""
 # 获取commit信息和自定义版本号
 COMMIT_MSG="$1"
 CUSTOM_VERSION="$2"
+
+# 更新 oscheckperf 脚本中的版本信息
+update_oscheckperf_version() {
+    local version="$1"
+    local script_file="oscheckperf"
+    
+    if [ ! -f "$script_file" ]; then
+        echo -e "${YELLOW}⚠ oscheckperf 文件不存在，跳过版本更新${NC}"
+        return
+    fi
+    
+    # 移除 'v' 前缀（如果有）
+    version="${version#v}"
+    
+    # 更新注释中的版本号（第4行）
+    sed -i "s/^#-- Version:.*/#-- Version:     v${version}/" "$script_file"
+    
+    # 更新 --version 输出的版本号（第72行）
+    sed -i "s/^                echo \"Version:.*/                echo \"Version: ${version}\"/" "$script_file"
+    
+    echo -e "${GREEN}✓ oscheckperf 版本已更新为 ${version}${NC}"
+}
 
 if [ -z "$COMMIT_MSG" ]; then
     # 自动生成commit信息
@@ -73,6 +95,8 @@ if [ -n "$CUSTOM_VERSION" ]; then
     NEW_VERSION="$CUSTOM_VERSION"
     VERSION_ENTRY="| $NEW_VERSION | $DATE | $COMMIT_SUMMARY |"
     echo -e "${YELLOW}使用自定义版本号: $NEW_VERSION${NC}"
+    # 更新 oscheckperf 脚本中的版本信息
+    update_oscheckperf_version "$NEW_VERSION"
 else
     VERSION_ENTRY="|        | $DATE | $COMMIT_SUMMARY |"
 fi

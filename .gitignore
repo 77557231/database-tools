@@ -2,3 +2,5 @@
 !.gitignore
 output/
 sysbench-*/
+tools/push-all.sh
+tools/test.sh

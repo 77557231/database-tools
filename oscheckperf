@@ -1,7 +1,7 @@
 #!/bin/bash
 #--------------------------------------------------------------------------------
 #-- File name:   oscheckperf
-#-- Version:     v2.0.0
+#-- Version:     v0.6.0
 #-- Purpose:     Database System Benchmark Tool
 #-- Author:      Vastbase Performance Team
 #-- Description: One-click system benchmarking tool, supports configuration via config file or command line parameters
@@ -68,6 +68,10 @@ parse_args() {
                 show_help
                 exit 0
                 ;;
+            --version)
+                echo "Version: 0.6.0"
+                exit 0
+                ;;
             --dry-run)
                 DRY_RUN=true
                 i=$((i + 1))
@@ -80,10 +84,6 @@ parse_args() {
         export REMOTE=true
         i=$((i + 1))
         ;;
-            -d)
-                DRY_RUN=true
-                i=$((i + 1))
-                ;;
             -h)
                 show_help
                 exit 0
@@ -209,9 +209,11 @@ show_help() {
     echo "  -o <output_dir>   Specify output directory path (default: ./output)"
     echo "  -f <servers_file> Specify servers list file path (one IP per line)"
     echo "  -i                Install and distribute sysbench to target servers"
-    echo "  -d                Dry run mode (show commands without execution)"
     echo "  -h                Show this help message"
     echo "  --debug           Enable debug mode (show detailed logs)"
+    echo "  --version         Show version information"
+    echo "  --remote          Remote mode (execute on remote servers)"
+    echo "  --dry-run         Dry run mode (show commands without execution)"
     echo ""
     echo "Common parameters (KEY=VALUE format):"
     echo "  DURATION=<seconds>          Unified test duration (default: 60)"
@@ -235,6 +237,12 @@ show_help() {
     echo "  IO_FILE_NUM=<number>        Number of test files (default: 1)"
     echo "  IO_TEST_PATH=<path>         Test directory path (default: \$HOME/oscheckperf/io_test)"
     echo "  FIO_DURATION=<seconds>      fio test duration (default: same as DURATION)"
+    echo "  FIO_PROFILES=<profiles>     fio test profiles, space-separated (default: randrw)"
+    echo "                              Available modes: read, write, randread, randwrite, rw, randrw, trim, randtrim, trimwrite"
+    echo "  FIO_BS=<size>              Block size for all profiles (default: 8K)"
+    echo "  FIO_IODEPTH=<num>           I/O depth for all profiles (default: 64)"
+    echo "  FIO_NUMJOBS=<num>           Number of jobs for all profiles (default: 4)"
+    echo "  FIO_DIRECT=0|1              Direct I/O mode (default: 1, bypass OS cache)"
     echo ""
     echo "Network test parameters:"
     echo "  NETWORK_MODE=serial|parallel|matrix  Network test mode (default: serial)"
@@ -664,10 +672,10 @@ append_to_original() {
     echo "$section_title (Server: $local_ip) (ORIGINAL OUTPUT)" >> "$original_file"
     echo "================================================================================" >> "$original_file"
     if [ -f "$result_file" ]; then
-        # For sysbench tests, extract only the raw test output
-        if echo "$section_title" | grep -E "CPU|MEMORY|IO|THREADS|MUTEX" > /dev/null; then
+        # For sysbench and fio tests, extract only the raw test output
+        if echo "$section_title" | grep -E "CPU|MEMORY|IO|THREADS|MUTEX|FIO" > /dev/null; then
             # For both local and remote tests, just append the whole file to original data
-            # This ensures we capture all raw sysbench output
+            # This ensures we capture all raw sysbench/fio output
             cat "$result_file" >> "$original_file"
         # For pgbench tests
         elif echo "$section_title" | grep -E "PGBENCH" > /dev/null; then
@@ -718,7 +726,7 @@ run_sysbench_fileio() {
     
     # Only display test info in non-remote mode
     if [ "$REMOTE" != "true" ]; then
-        echo "Starting fileio test..."
+        echo "[sysbench] Starting fileio test..."
         echo "  File size: ${IO_TOTAL_SIZE:-1G}, Test mode: ${IO_TEST_MODE:-rndrw}"
         echo "  Test directory: $test_dir"
     fi
@@ -745,6 +753,14 @@ run_sysbench_fileio() {
         return 1
     }
     
+    if [ "$DRY_RUN" = true ]; then
+        echo "  [DRY RUN] Would execute sysbench fileio prepare"
+        echo "  [DRY RUN] Would execute sysbench fileio run"
+        echo "  [DRY RUN] Would execute sysbench fileio cleanup"
+        cd "$current_dir" || true
+        return 0
+    fi
+
     # Prepare test files first
     sysbench fileio \
         --file-total-size="${IO_TOTAL_SIZE:-1G}" \
@@ -810,28 +826,23 @@ run_fio_test() {
     fi
     
     # Iterate through all profiles
-    local profiles="${FIO_PROFILES:-randread}"
+    local profiles="${FIO_PROFILES:-randrw}"
     
     for profile in $profiles; do
         echo "  Executing profile: $profile"
         
         # Generate fio configuration
         local fio_conf="/tmp/fio_${profile}.fio"
-        local rw_type=$(eval echo "\$FIO_${profile^^}_RW")
-        local bs=$(eval echo "\$FIO_${profile^^}_BS")
-        local iodepth=$(eval echo "\$FIO_${profile^^}_IODEPTH")
-        local numjobs=$(eval echo "\$FIO_${profile^^}_NUMJOBS")
-        
-        # Set default values
-        rw_type="${rw_type:-randread}"
-        bs="${bs:-8K}"
-        iodepth="${iodepth:-64}"
-        numjobs="${numjobs:-4}"
+        local rw_type="${profile}"
+        local bs="${FIO_BS:-8K}"
+        local iodepth="${FIO_IODEPTH:-64}"
+        local numjobs="${FIO_NUMJOBS:-4}"
+        local direct="${FIO_DIRECT:-1}"
         
         cat > "$fio_conf" << EOF
 [global]
 ioengine=libaio
-direct=1
+direct=${direct}
 size=${IO_TOTAL_SIZE:-1G}
 runtime=${FIO_DURATION:-300}
 time_based
@@ -855,7 +866,18 @@ EOF
         
         # Run fio test
         local json_output="$OUTPUT_DIR/fio_${profile}_result.json"
-        run_command "fio \"$fio_conf\" --output=\"$json_output\" --output-format=json" "/dev/null"
+        local raw_output="/tmp/fio_${profile}_raw_${TIMESTAMP}.txt"
+        
+        if [ "$DRY_RUN" = true ]; then
+            echo "[DRY RUN] Would execute: fio \"$fio_conf\""
+            echo "[DRY RUN] Would execute: fio \"$fio_conf\" --output=\"$json_output\" --output-format=json"
+        else
+            # Run fio twice: once for human-readable output, once for JSON
+            # First run: human-readable output
+            fio "$fio_conf" > "$raw_output" 2>&1
+            # Second run: JSON output
+            fio "$fio_conf" --output="$json_output" --output-format=json > /dev/null 2>&1
+        fi
         
         # Cleanup temporary files (also cleanup in dry run mode)
         rm -f "$fio_conf"
@@ -867,7 +889,13 @@ EOF
         # Parse result
         if [ "$DRY_RUN" != true ] && [ -f "$json_output" ]; then
             parse_fio_result "$json_output" "$profile"
+            
+            # Append raw output to original data file
+            append_to_original "FIO TEST RESULTS ($profile)" "$raw_output"
         fi
+        
+        # Cleanup raw output file
+        rm -f "$raw_output"
     done
     
     echo "✓ fio test completed"
@@ -2234,7 +2262,20 @@ generate_report() {
     printf -- "  Enabled: ${IO_ENABLED:-true}\n" >> "$report_file"
     printf -- "  Tool: ${IO_TOOL:-sysbench}\n" >> "$report_file"
     printf -- "  File Size: ${IO_TOTAL_SIZE:-1G}\n" >> "$report_file"
-    printf -- "  Test Mode: ${IO_TEST_MODE:-rndrw}\n" >> "$report_file"
+    if [ "${IO_TOOL:-sysbench}" = "fio" ]; then
+        printf -- "  Test Profiles: ${FIO_PROFILES:-randrw}\n" >> "$report_file"
+        # Show individual profile configurations
+        local profiles="${FIO_PROFILES:-randrw}"
+        for profile in $profiles; do
+            local rw_type="${profile}"
+            local bs="${FIO_BS:-8K}"
+            local iodepth="${FIO_IODEPTH:-64}"
+            local numjobs="${FIO_NUMJOBS:-4}"
+            printf -- "  Profile %s: rw=%s, bs=%s, iodepth=%s, numjobs=%s\n" "$profile" "$rw_type" "$bs" "$iodepth" "$numjobs" >> "$report_file"
+        done
+    else
+        printf -- "  Test Mode: ${IO_TEST_MODE:-rndrw}\n" >> "$report_file"
+    fi
     printf -- "  Test Path: ${IO_TEST_PATH:-$HOME/oscheckperf/io_test}\n" >> "$report_file"
     printf -- "  Duration: $(if [ "${IO_TOOL:-sysbench}" = "fio" ]; then echo "${FIO_DURATION:-$unified_duration}s"; else echo "${unified_duration}s"; fi)\n" >> "$report_file"
     printf -- "\n" >> "$report_file"
@@ -2450,8 +2491,10 @@ EOF
                 # Multiple servers - show comparison table
                 echo "  IO Test Comparison (Multiple Servers)" >> "$report_file"
                 echo "  =========================================================" >> "$report_file"
+                echo "  IO Tool: ${IO_TOOL:-sysbench}" >> "$report_file"
+                echo "  --------------------------------------------------------------------------------------------" >> "$report_file"
                 printf "  %-20s %-12s %-12s %-12s %-12s %-12s %-12s %-15s %-10s\n" "Server IP" "Read IOPS" "Write IOPS" "Total IOPS" "Read BW" "Write BW" "Total BW" "Avg Latency (ms)" "Mode" >> "$report_file"
-                echo "  ---------------------------------------------------------------------------------------------" >> "$report_file"
+                echo "  --------------------------------------------------------------------------------------------" >> "$report_file"
                 
                 local in_io_section=false
                 local current_server_ip=""
@@ -2463,9 +2506,10 @@ EOF
                 local current_total_bw=""
                 local current_avg_lat=""
                 local current_io_mode="${IO_TEST_MODE:-rndrw}"
+                local current_tool="${IO_TOOL:-sysbench}"
                 
                 while IFS= read -r line; do
-                    if [[ "$line" =~ "SYSBENCH FILEIO TEST RESULTS" ]] || [[ "$line" =~ "FIO TEST RESULTS" ]] || [[ "$line" =~ "IO TEST RESULTS" ]]; then
+                    if [[ "$line" =~ "SYSBENCH FILEIO TEST RESULTS" ]]; then
                         if [ "$in_io_section" = true ] && [ -n "$current_server_ip" ]; then
                             if [ -n "$current_read_iops" ] && [ -n "$current_write_iops" ]; then
                                 current_total_iops=$(awk "BEGIN {printf \"%.2f\", $current_read_iops + $current_write_iops}" 2>/dev/null || echo "N/A")
@@ -2489,22 +2533,126 @@ EOF
                         current_total_bw=""
                         current_avg_lat=""
                         current_io_mode="${IO_TEST_MODE:-rndrw}"
+                        current_tool="sysbench"
+                        expect_avg_lat=false
+                    elif [[ "$line" =~ "FIO TEST RESULTS" ]]; then
+                        if [ "$in_io_section" = true ] && [ -n "$current_server_ip" ]; then
+                            if [ -n "$current_read_iops" ] && [ -n "$current_write_iops" ]; then
+                                current_total_iops=$(awk "BEGIN {printf \"%.2f\", $current_read_iops + $current_write_iops}" 2>/dev/null || echo "N/A")
+                            else
+                                current_total_iops="N/A"
+                            fi
+                            if [ -n "$current_read_bw" ] && [ -n "$current_write_bw" ]; then
+                                current_total_bw=$(awk "BEGIN {printf \"%.2f\", $current_read_bw + $current_write_bw}" 2>/dev/null || echo "N/A")
+                            else
+                                current_total_bw="N/A"
+                            fi
+                            printf "  %-20s %-12s %-12s %-12s %-12s %-12s %-12s %-15s %-10s\n" "$current_server_ip" "${current_read_iops:-N/A}" "${current_write_iops:-N/A}" "${current_total_iops:-N/A}" "${current_read_bw:-N/A}" "${current_write_bw:-N/A}" "${current_total_bw:-N/A}" "${current_avg_lat:-N/A}" "${current_io_mode:-rndread}" >> "$report_file"
+                        fi
+                        in_io_section=true
+                        current_server_ip=$(echo "$line" | grep -oP 'Server: \K[0-9.]+' || echo "N/A")
+                        current_read_iops=""
+                        current_write_iops=""
+                        current_total_iops=""
+                        current_read_bw=""
+                        current_write_bw=""
+                        current_total_bw=""
+                        current_avg_lat=""
+                        current_io_mode=$(echo "$line" | grep -oP 'FIO TEST RESULTS \(([^)]+)\)' | awk -F'[()]' '{print $2}')
+                        current_tool="fio"
+                        expect_avg_lat=false
+                    elif [[ "$line" =~ "IO TEST RESULTS" ]]; then
+                        if [ "$in_io_section" = true ] && [ -n "$current_server_ip" ]; then
+                            if [ -n "$current_read_iops" ] && [ -n "$current_write_iops" ]; then
+                                current_total_iops=$(awk "BEGIN {printf \"%.2f\", $current_read_iops + $current_write_iops}" 2>/dev/null || echo "N/A")
+                            else
+                                current_total_iops="N/A"
+                            fi
+                            if [ -n "$current_read_bw" ] && [ -n "$current_write_bw" ]; then
+                                current_total_bw=$(awk "BEGIN {printf \"%.2f\", $current_read_bw + $current_write_bw}" 2>/dev/null || echo "N/A")
+                            else
+                                current_total_bw="N/A"
+                            fi
+                            printf "  %-20s %-12s %-12s %-12s %-12s %-12s %-12s %-15s %-10s\n" "$current_server_ip" "${current_read_iops:-N/A}" "${current_write_iops:-N/A}" "${current_total_iops:-N/A}" "${current_read_bw:-N/A}" "${current_write_bw:-N/A}" "${current_total_bw:-N/A}" "${current_avg_lat:-N/A}" "${current_io_mode:-rndrw}" >> "$report_file"
+                        fi
+                        in_io_section=true
+                        current_server_ip=$(echo "$line" | grep -oP 'Server: \K[0-9.]+' || echo "N/A")
+                        current_read_iops=""
+                        current_write_iops=""
+                        current_total_iops=""
+                        current_read_bw=""
+                        current_write_bw=""
+                        current_total_bw=""
+                        current_avg_lat=""
+                        current_io_mode="${IO_TEST_MODE:-rndrw}"
+                        current_tool="sysbench"
                         expect_avg_lat=false
                     elif [ "$in_io_section" = true ]; then
-                        if [[ "$line" =~ "reads/s:" ]]; then
-                            current_read_iops=$(echo "$line" | awk '{print $NF}')
-                            expect_avg_lat=true
-                        elif [[ "$line" =~ "writes/s:" ]]; then
-                            current_write_iops=$(echo "$line" | awk '{print $NF}')
-                        elif [[ "$line" =~ "total/s:" ]]; then
-                            current_total_iops=$(echo "$line" | awk '{print $NF}')
-                        elif [[ "$line" =~ "read, MiB/s:" ]]; then
-                            current_read_bw=$(echo "$line" | awk '{print $NF}')
-                        elif [[ "$line" =~ "written, MiB/s:" ]]; then
-                            current_write_bw=$(echo "$line" | awk '{print $NF}')
-                        elif $expect_avg_lat && [[ "$line" =~ "avg:" ]]; then
-                            current_avg_lat=$(echo "$line" | awk '{print $NF}' | tr -d ',')
-                            expect_avg_lat=false
+                        # Handle sysbench output
+                        if [ "$current_tool" = "sysbench" ]; then
+                            if [[ "$line" =~ "reads/s:" ]]; then
+                                current_read_iops=$(echo "$line" | awk '{print $NF}')
+                                expect_avg_lat=true
+                            elif [[ "$line" =~ "writes/s:" ]]; then
+                                current_write_iops=$(echo "$line" | awk '{print $NF}')
+                            elif [[ "$line" =~ "total/s:" ]]; then
+                                current_total_iops=$(echo "$line" | awk '{print $NF}')
+                            elif [[ "$line" =~ "read, MiB/s:" ]]; then
+                                current_read_bw=$(echo "$line" | awk '{print $NF}')
+                            elif [[ "$line" =~ "written, MiB/s:" ]]; then
+                                current_write_bw=$(echo "$line" | awk '{print $NF}')
+                            elif $expect_avg_lat && [[ "$line" =~ "avg:" ]]; then
+                                current_avg_lat=$(echo "$line" | awk '{print $NF}' | tr -d ',')
+                                expect_avg_lat=false
+                            fi
+                        # Handle fio output
+                        elif [ "$current_tool" = "fio" ]; then
+                            if echo "$line" | grep -q "read:"; then
+                                # Format: read: IOPS=46.7k, BW=365MiB/s (383MB/s)(732MiB/2005msec)
+                                local iops_part=$(echo "$line" | grep -o "IOPS=[0-9.]*[kM]*")
+                                local bw_part=$(echo "$line" | grep -o "BW=[0-9.]*MiB/s")
+                                
+                                if [ -n "$iops_part" ]; then
+                                    local iops_value=$(echo "$iops_part" | sed 's/IOPS=//')
+                                    if echo "$iops_value" | grep -q "k"; then
+                                        current_read_iops=$(echo "$iops_value" | sed 's/k//' | awk '{printf "%.2f", $1 * 1000}')
+                                    elif echo "$iops_value" | grep -q "M"; then
+                                        current_read_iops=$(echo "$iops_value" | sed 's/M//' | awk '{printf "%.2f", $1 * 1000000}')
+                                    else
+                                        current_read_iops="$iops_value"
+                                    fi
+                                fi
+                                
+                                if [ -n "$bw_part" ]; then
+                                    current_read_bw=$(echo "$bw_part" | sed 's/BW=//' | sed 's/MiB\/s//')
+                                fi
+                            fi
+                            
+                            if echo "$line" | grep -q "write:"; then
+                                # Format: write: IOPS=0, BW=0MiB/s (0MB/s)(0MiB/2005msec)
+                                local iops_part=$(echo "$line" | grep -o "IOPS=[0-9.]*[kM]*")
+                                local bw_part=$(echo "$line" | grep -o "BW=[0-9.]*MiB/s")
+                                
+                                if [ -n "$iops_part" ]; then
+                                    local iops_value=$(echo "$iops_part" | sed 's/IOPS=//')
+                                    if echo "$iops_value" | grep -q "k"; then
+                                        current_write_iops=$(echo "$iops_value" | sed 's/k//' | awk '{printf "%.2f", $1 * 1000}')
+                                    elif echo "$iops_value" | grep -q "M"; then
+                                        current_write_iops=$(echo "$iops_value" | sed 's/M//' | awk '{printf "%.2f", $1 * 1000000}')
+                                    else
+                                        current_write_iops="$iops_value"
+                                    fi
+                                fi
+                                
+                                if [ -n "$bw_part" ]; then
+                                    current_write_bw=$(echo "$bw_part" | sed 's/BW=//' | sed 's/MiB\/s//')
+                                fi
+                            fi
+                            
+                            if echo "$line" | grep -q "avg="; then
+                                # Extract average latency
+                                current_avg_lat=$(echo "$line" | grep -o "avg=[0-9.]*" | sed 's/avg=//')
+                            fi
                         fi
                     fi
                 done < "$combined_file"
@@ -2521,17 +2669,57 @@ EOF
                 fi
             else
                 # Single server - show results directly
-                local io_read_iops=$(grep "reads/s:" "$combined_file" 2>/dev/null | awk '{print $NF}')
-                local io_write_iops=$(grep "writes/s:" "$combined_file" 2>/dev/null | awk '{print $NF}')
-                local io_read_bw=$(grep "read, MiB/s:" "$combined_file" 2>/dev/null | awk '{print $NF}')
-                local io_write_bw=$(grep "written, MiB/s:" "$combined_file" 2>/dev/null | awk '{print $NF}')
-                local io_avg_lat=$(grep "avg:" "$combined_file" 2>/dev/null | head -1 | awk '{print $NF}' | tr -d ',')
+                # Check if it's fio test
+                if grep -q "FIO TEST RESULTS" "$combined_file" 2>/dev/null; then
+                    # fio test results
+                    local fio_profiles=$(grep -oP 'FIO TEST RESULTS \(([^)]+)\)' "$combined_file" | awk -F'[()]' '{print $2}')
+                    echo "  FIO Test Results" >> "$report_file"
+                    echo "  =================" >> "$report_file"
+                    
+                    for profile in $fio_profiles; do
+                        # Extract fio results for this profile
+                        local profile_section=$(sed -n "/FIO TEST RESULTS ($profile)/,/FIO TEST RESULTS/p" "$combined_file" | head -n -1)
+                        local read_iops=$(echo "$profile_section" | grep -A5 "read:" | grep -oP 'iops=\K[0-9.]+')
+                        local write_iops=$(echo "$profile_section" | grep -A5 "write:" | grep -oP 'iops=\K[0-9.]+')
+                        local read_bw=$(echo "$profile_section" | grep -A5 "read:" | grep -oP 'bw=\K[0-9.]+' | awk '{printf "%.2f", $1/1024}')
+                        local write_bw=$(echo "$profile_section" | grep -A5 "write:" | grep -oP 'bw=\K[0-9.]+' | awk '{printf "%.2f", $1/1024}')
+                        local avg_lat=$(echo "$profile_section" | grep -oP 'lat.*avg=\K[0-9.]+')
+                        
+                        if [ -n "$read_iops" ] || [ -n "$write_iops" ]; then
+                            local total_iops="N/A"
+                            local total_bw="N/A"
+                            if [ -n "$read_iops" ] && [ -n "$write_iops" ]; then
+                                total_iops=$(awk "BEGIN {printf \"%.2f\", $read_iops + $write_iops}" 2>/dev/null || echo "N/A")
+                            fi
+                            if [ -n "$read_bw" ] && [ -n "$write_bw" ]; then
+                                total_bw=$(awk "BEGIN {printf \"%.2f\", $read_bw + $write_bw}" 2>/dev/null || echo "N/A")
+                            fi
+                            
+                            cat >> "$report_file" << EOF
+  Profile: $profile
+  Read IOPS:        ${read_iops:-N/A}
+  Write IOPS:       ${write_iops:-N/A}
+  Total IOPS:       ${total_iops}
+  Read BW:          ${read_bw:-N/A} MB/s
+  Write BW:         ${write_bw:-N/A} MB/s
+  Total BW:         ${total_bw}
+  Avg Latency:      ${avg_lat:-N/A} ms
+EOF
+                        fi
+                    done
+                else
+                    # sysbench test results
+                    local io_read_iops=$(grep "reads/s:" "$combined_file" 2>/dev/null | awk '{print $NF}')
+                    local io_write_iops=$(grep "writes/s:" "$combined_file" 2>/dev/null | awk '{print $NF}')
+                    local io_read_bw=$(grep "read, MiB/s:" "$combined_file" 2>/dev/null | awk '{print $NF}')
+                    local io_write_bw=$(grep "written, MiB/s:" "$combined_file" 2>/dev/null | awk '{print $NF}')
+                    local io_avg_lat=$(grep "avg:" "$combined_file" 2>/dev/null | head -1 | awk '{print $NF}' | tr -d ',')
 
-                if [ -n "$io_read_iops" ]; then
-                    local io_total_iops=$(awk "BEGIN {printf \"%.2f\", $io_read_iops + $io_write_iops}" 2>/dev/null || echo "N/A")
-                    local io_total_bw=$(awk "BEGIN {printf \"%.2f\", $io_read_bw + $io_write_bw}" 2>/dev/null || echo "N/A")
+                    if [ -n "$io_read_iops" ]; then
+                        local io_total_iops=$(awk "BEGIN {printf \"%.2f\", $io_read_iops + $io_write_iops}" 2>/dev/null || echo "N/A")
+                        local io_total_bw=$(awk "BEGIN {printf \"%.2f\", $io_read_bw + $io_write_bw}" 2>/dev/null || echo "N/A")
 
-                    cat >> "$report_file" << EOF
+                        cat >> "$report_file" << EOF
   Read IOPS:        ${io_read_iops}
   Write IOPS:       ${io_write_iops}
   Total IOPS:       ${io_total_iops}
@@ -2541,8 +2729,9 @@ EOF
   Avg Latency:      ${io_avg_lat:-0} ms
   Mode:             ${IO_TEST_MODE:-rndrw}
 EOF
-                else
-                    echo "  Test not executed" >> "$report_file"
+                    else
+                        echo "  Test not executed" >> "$report_file"
+                    fi
                 fi
             fi
         else
@@ -3042,7 +3231,7 @@ main() {
         fi
         
         # Initialize tee logging BEFORE any output - all output goes to both terminal and data log file
-        if [ "$REMOTE" != "true" ] && [ "$CHECK_ENABLED" != "true" ]; then
+        if [ "$REMOTE" != "true" ] && [ "$CHECK_ENABLED" != "true" ] && [ "$DRY_RUN" != true ]; then
             # Create OUTPUT_DIR if not exists
             mkdir -p "$OUTPUT_DIR"
             # Use exec tee to simultaneously output to terminal and log file
@@ -3243,9 +3432,9 @@ main() {
                     local temp_remote_file="/tmp/vb_remote_${target_ip//./_}_${TIMESTAMP}.txt"
                     
                     # Always use remote oscheckperf for consistent execution
-                        # Check if remote oscheckperf exists, if not, skip this server
-                        if ssh "$target_ip" "[ -d ~/oscheckperf ]" 2>/dev/null; then
-                            # Use remote oscheckperf
+                    # Check if remote oscheckperf exists, if not, skip this server
+                    if ssh "$target_ip" "[ -d ~/oscheckperf ]" 2>/dev/null; then
+                        # Use remote oscheckperf
                         # Build the remote command with only the requested tests
                         local remote_test_command=""
                         if [ "$CPU_ENABLED" = "true" ]; then
@@ -3267,11 +3456,29 @@ main() {
                         # Add duration parameter
                         if [ -n "$remote_test_command" ]; then
                             remote_test_command="$remote_test_command DURATION=$DURATION"
+                            # Add IO test specific parameters
+                            if [ "$IO_ENABLED" = "true" ]; then
+                                remote_test_command="$remote_test_command IO_TOOL=$IO_TOOL"
+                                if [ "$IO_TOOL" = "fio" ]; then
+                                    remote_test_command="$remote_test_command FIO_DURATION=${FIO_DURATION:-$DURATION}"
+                                    remote_test_command="$remote_test_command FIO_PROFILES=\"${FIO_PROFILES:-randrw}\""
+                                    remote_test_command="$remote_test_command FIO_BS=${FIO_BS:-8K}"
+                                    remote_test_command="$remote_test_command FIO_IODEPTH=${FIO_IODEPTH:-64}"
+                                    remote_test_command="$remote_test_command FIO_NUMJOBS=${FIO_NUMJOBS:-4}"
+                                    remote_test_command="$remote_test_command FIO_DIRECT=${FIO_DIRECT:-1}"
+                                else
+                                    remote_test_command="$remote_test_command IO_TEST_MODE=${IO_TEST_MODE:-rndrw}"
+                                fi
+                                remote_test_command="$remote_test_command IO_TOTAL_SIZE=${IO_TOTAL_SIZE:-1G} IO_FILE_NUM=${IO_FILE_NUM:-1} IO_TEST_PATH=${IO_TEST_PATH:-$HOME/oscheckperf/io_test}"
+                            fi
                         fi
                         
                         # Add NO_CHECKS parameter to skip checks during benchmark
                         local full_remote_command="cd ~/oscheckperf && TIMESTAMP=$TIMESTAMP ./oscheckperf $remote_test_command NO_CHECKS=true REMOTE=true"
-                        if ssh "$target_ip" "$full_remote_command" 2>&1 > "$temp_remote_file"; then
+                        if [ "$DRY_RUN" = true ]; then
+                            echo "[DRY RUN] Would execute remote command on $target_ip:"
+                            echo "  ssh $target_ip '$full_remote_command'"
+                        elif ssh "$target_ip" "$full_remote_command" 2>&1 > "$temp_remote_file"; then
                             # Display remote test output
                             cat "$temp_remote_file"
                             
@@ -3347,8 +3554,8 @@ main() {
         fi
     fi
     
-    # Only generate report in non-remote mode
-    if [ "$REMOTE" != "true" ]; then
+    # Only generate report in non-remote mode and non-dry-run mode
+    if [ "$REMOTE" != "true" ] && [ "$DRY_RUN" != true ]; then
         # Generate report
         generate_report
         
@@ -3357,6 +3564,9 @@ main() {
         echo "Report: $OUTPUT_DIR/report_benchmark_${TIMESTAMP}.log"
         echo "Detailed results: $OUTPUT_DIR/data_${TIMESTAMP}_all_results.log"
         echo "Original data: $OUTPUT_DIR/original_data_${TIMESTAMP}_all_results.log"
+    elif [ "$DRY_RUN" = true ]; then
+        echo ""
+        echo "[DRY RUN] Report generation skipped"
     fi
 }
 
