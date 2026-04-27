@@ -227,14 +227,14 @@ cat output/report_benchmark_*.log
 Sysbench 的 fileio 测试分为三个阶段：
 
 1. **prepare 阶段**：创建测试文件
-   - 在 `IO_TEST_PATH` 指定的目录中创建测试文件
+   - 在 `IO_PATH` 指定的目录中创建测试文件
    - 默认文件大小为 1G（可通过 `IO_TOTAL_SIZE` 调整）
-   - 默认创建 1 个文件（可通过 `IO_FILE_NUM` 调整）
+   - 默认创建 1 个文件（可通过 `SYSBENCH_FILE_NUM` 调整）
 
 2. **run 阶段**：执行实际压测
    - `DURATION` 参数仅控制此阶段的执行时间
    - 对 prepare 阶段创建的文件进行随机读写操作
-   - 测试模式默认为 `rndrw`（随机读写），可通过 `IO_TEST_MODE` 调整
+   - 测试模式默认为 `rndrw`（随机读写），可通过 `SYSBENCH_PROFILES` 调整
 
 3. **cleanup 阶段**：自动清理测试文件
    - 删除 prepare 阶段创建的所有测试文件
@@ -250,7 +250,7 @@ FIO 测试采用不同的工作方式：
 
 #### 重要注意事项
 
-**IO_TEST_PATH 参数说明**：
+**IO_PATH 参数说明**：
 
 - 默认测试路径为 `$HOME/oscheckperf/io_test`
 - **不要使用 `/tmp` 目录**：某些服务器的 `/tmp` 是 tmpfs（内存文件系统），会导致测试结果不准确（测试的是内存而非磁盘）
@@ -261,13 +261,18 @@ FIO 测试采用不同的工作方式：
 
 | 参数 | 默认值 | 说明 |
 |------|--------|------|
-| `IO_TEST_PATH` | `$HOME/oscheckperf/io_test` | 测试文件目录 |
+| `IO_PATH` | `$HOME/oscheckperf/io_test` | 测试文件目录（替代IO_TEST_PATH） |
 | `IO_TOTAL_SIZE` | `1G` | 测试文件总大小（sysbench 和 fio 通用） |
-| `IO_TEST_MODE` | `rndrw` | 测试模式（seqwr/seqrd/rndwr/rndrd/rndrw） |
-| `IO_FILE_NUM` | `1` | 测试文件数量 |
+| `SYSBENCH_PROFILES` | `rndrw` | sysbench 测试模式，空格分隔（seqwr/seqrewr/seqrd/rndrd/rndwr/rndrw） |
+| `SYSBENCH_FILE_NUM` | `1` | sysbench 测试文件数量 |
 | `IO_TOOL` | `sysbench` | IO 测试工具（sysbench/fio） |
-| `IO_DURATION` | `DURATION` | sysbench IO 测试时长 |
-| `FIO_DURATION` | `300` | fio 测试时长 |
+| `SYSBENCH_DURATION` | `DURATION` | sysbench IO 测试时长 |
+| `FIO_DURATION` | `DURATION` | fio 测试时长 |
+| `FIO_PROFILES` | `randrw` | fio 测试模式，空格分隔（read/write/randread/randwrite/rw/randrw/trim/randtrim/trimwrite） |
+| `FIO_BS` | `8K` | fio 块大小 |
+| `FIO_IODEPTH` | `64` | fio I/O 深度 |
+| `FIO_NUMJOBS` | `4` | fio 工作线程数 |
+| `FIO_DIRECT` | `1` | fio 直接 I/O 模式 |
 
 **示例**：
 
@@ -276,10 +281,10 @@ FIO 测试采用不同的工作方式：
 ./oscheckperf io DURATION=60 IO_TOTAL_SIZE=2G
 
 # 使用 fio 进行顺序读测试
-./oscheckperf io IO_TOOL=fio IO_TEST_MODE=read FIO_DURATION=60
+./oscheckperf io IO_TOOL=fio FIO_PROFILES=read FIO_DURATION=60
 
 # 指定测试路径到数据库数据目录
-./oscheckperf io IO_TEST_PATH=/data/vastbase/pg_xlog
+./oscheckperf io IO_PATH=/data/vastbase/pg_xlog
 ```
 
 ### 网络测试

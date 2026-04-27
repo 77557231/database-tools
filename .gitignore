@@ -2,5 +2,5 @@
 !.gitignore
 output/
 sysbench-*/
-tools/push-all.sh
-tools/test.sh
+tools/oscheckperf_push_all.sh
+tools/oscheckperf_test.sh
