@@ -1,7 +1,7 @@
 #!/bin/bash
 #--------------------------------------------------------------------------------
 #-- File name:   oscheckperf
-#-- Version:     v0.6.0
+#-- Version:     v0.6.2
 #-- Purpose:     Database System Benchmark Tool
 #-- Author:      Vastbase Performance Team
 #-- Description: One-click system benchmarking tool, supports configuration via config file or command line parameters
@@ -69,7 +69,7 @@ parse_args() {
                 exit 0
                 ;;
             --version)
-                echo "Version: 0.6.0"
+                echo "Version: 0.6.2"
                 exit 0
                 ;;
             --dry-run)
@@ -233,14 +233,18 @@ show_help() {
     echo "IO test parameters:"
     echo "  IO_TOOL=sysbench|fio        IO test tool (default: sysbench)"
     echo "  IO_TOTAL_SIZE=<size>        Total file size for IO test (default: 1G)"
+    echo "  IO_PATH=<path>              IO test directory path (default: \$HOME/oscheckperf/io_test)"
+    echo ""
+    echo "  SYSBENCH_* parameters (when IO_TOOL=sysbench):"
     echo "  SYSBENCH_PROFILES=<profiles>     sysbench IO profiles, space-separated (default: rndrw)"
-    echo "                              Available modes: seqwr, seqrewr, seqrd, rndrd, rndwr, rndrw"
+    echo "                                  Available modes: seqwr, seqrewr, seqrd, rndrd, rndwr, rndrw"
     echo "  SYSBENCH_FILE_NUM=<number>        Number of test files (default: 1)"
-    echo "  IO_PATH=<path>             IO test directory path (default: \$HOME/oscheckperf/io_test)"
     echo "  SYSBENCH_DURATION=<seconds>  sysbench IO test duration (default: same as DURATION)"
-    echo "  FIO_DURATION=<seconds>      fio test duration (default: same as DURATION)"
+    echo ""
+    echo "  FIO_* parameters (when IO_TOOL=fio):"
     echo "  FIO_PROFILES=<profiles>     fio test profiles, space-separated (default: randrw)"
     echo "                              Available modes: read, write, randread, randwrite, rw, randrw, trim, randtrim, trimwrite"
+    echo "  FIO_DURATION=<seconds>      fio test duration (default: same as DURATION)"
     echo "  FIO_BS=<size>              Block size for all profiles (default: 8K)"
     echo "  FIO_IODEPTH=<num>           I/O depth for all profiles (default: 64)"
     echo "  FIO_NUMJOBS=<num>           Number of jobs for all profiles (default: 4)"
@@ -270,12 +274,17 @@ show_help() {
     echo "  # Run all tests"
     echo "  $0"
     echo "  $0 DURATION=30"
+    echo "  $0 all -f servers.txt DURATION=100"
     echo ""
     echo "  # Run specific test"
     echo "  $0 cpu"
     echo "  $0 mem DURATION=20"
     echo "  $0 io IO_TOOL=fio"
+    echo "  $0 io -f servers.txt IO_TOOL=fio FIO_PROFILES=\"read write\" DURATION=100"
     echo "  $0 network -f servers.txt NETWORK_MODE=matrix"
+    echo ""
+    echo "  # Install and distribute sysbench to target servers"
+    echo "  $0 -f servers.txt -i"
     echo ""
 }
 
@@ -499,8 +508,7 @@ check_permissions() {
     echo "  Checking permissions..."
     
     # Check test directory write permission
-    # Support new IO_PATH parameter with backward compatibility to IO_TEST_PATH
-    local test_path="${IO_PATH:-${IO_TEST_PATH:-/tmp}}"
+        local test_path="${IO_PATH:-/tmp}"
     if [ -w "$test_path" ]; then
         echo "  ✓ Test directory write permission: $test_path"
     else
@@ -521,8 +529,7 @@ check_permissions() {
 check_disk_space() {
     echo "  Checking disk space..."
 
-    # Support new IO_PATH parameter with backward compatibility to IO_TEST_PATH
-    local test_path="${IO_PATH:-${IO_TEST_PATH:-/tmp}}"
+        local test_path="${IO_PATH:-/tmp}"
     local available_kb=$(get_disk_available_kb "$test_path")
     local available_gb=$((available_kb / 1024 / 1024))
     
@@ -675,6 +682,9 @@ append_to_original() {
     echo "================================================================================" >> "$original_file"
     echo "$section_title (Server: $local_ip) (ORIGINAL OUTPUT)" >> "$original_file"
     echo "================================================================================" >> "$original_file"
+    # Add execution command to log
+    echo "Execution Command: $full_command" >> "$original_file"
+    echo "" >> "$original_file"
     if [ -f "$result_file" ]; then
         # For sysbench and fio tests, extract only the raw test output
         if echo "$section_title" | grep -E "CPU|MEMORY|IO|THREADS|MUTEX|FIO" > /dev/null; then
@@ -724,8 +734,7 @@ run_io_test() {
 # sysbench fileio test
 run_sysbench_fileio() {
     # Use a real disk directory instead of /tmp (which may be tmpfs)
-    # Support new IO_PATH parameter with backward compatibility to IO_TEST_PATH
-    local test_dir="${IO_PATH:-${IO_TEST_PATH:-$HOME/oscheckperf/io_test}}"
+    local test_dir="${IO_PATH:-$HOME/oscheckperf/io_test}"
 
     # Support SYSBENCH_PROFILES parameter
     local test_modes="${SYSBENCH_PROFILES:-rndrw}"
@@ -863,7 +872,7 @@ rw=${rw_type}
 bs=${bs}
 iodepth=${iodepth}
 numjobs=${numjobs}
-filename=${IO_PATH:-${IO_TEST_PATH:-$HOME/oscheckperf/io_test}}/fio_test_${profile}
+filename=${IO_PATH:-$HOME/oscheckperf/io_test}/fio_test_${profile}
 EOF
         
         # Show configuration file content (also shown in dry run mode)
@@ -893,8 +902,7 @@ EOF
         rm -f "$fio_conf"
         
         # Cleanup fio test file
-        # Support new IO_PATH parameter with backward compatibility to IO_TEST_PATH
-        local fio_test_file="${IO_PATH:-${IO_TEST_PATH:-$HOME/oscheckperf/io_test}}/fio_test_${profile}"
+        local fio_test_file="${IO_PATH:-$HOME/oscheckperf/io_test}/fio_test_${profile}"
         rm -f "$fio_test_file"
         
         # Parse result
@@ -2274,9 +2282,9 @@ generate_report() {
     printf -- "  Tool: ${IO_TOOL:-sysbench}\n" >> "$report_file"
     printf -- "  File Size: ${IO_TOTAL_SIZE:-1G}\n" >> "$report_file"
     if [ "${IO_TOOL:-sysbench}" = "fio" ]; then
-        printf -- "  Test Profiles: ${FSYSBENCH_PROFILES:-randrw}\n" >> "$report_file"
+        printf -- "  Test Profiles: ${FIO_PROFILES:-randrw}\n" >> "$report_file"
         # Show individual profile configurations
-        local profiles="${FSYSBENCH_PROFILES:-randrw}"
+        local profiles="${FIO_PROFILES:-randrw}"
         for profile in $profiles; do
             local rw_type="${profile}"
             local bs="${FIO_BS:-8K}"
@@ -2287,8 +2295,7 @@ generate_report() {
     else
         printf -- "  Test Mode: ${SYSBENCH_PROFILES:-rndrw}\n" >> "$report_file"
     fi
-    # Support new IO_PATH parameter with backward compatibility to IO_TEST_PATH
-    printf -- "  Test Path: ${IO_PATH:-${IO_TEST_PATH:-$HOME/oscheckperf/io_test}}\n" >> "$report_file"
+    printf -- "  Test Path: ${IO_PATH:-$HOME/oscheckperf/io_test}\n" >> "$report_file"
     printf -- "  Duration: $(if [ "${IO_TOOL:-sysbench}" = "fio" ]; then echo "${FIO_DURATION:-$unified_duration}s"; else echo "${SYSBENCH_DURATION:-$unified_duration}s"; fi)\n" >> "$report_file"
     printf -- "\n" >> "$report_file"
     printf -- "[Network Test]\n" >> "$report_file"
@@ -3130,9 +3137,21 @@ EOF
 
 # Main function
 main() {
+    # Capture full execution command
+    local full_command="$0" 
+    for arg in "$@"; do
+        if [[ "$arg" =~ [[:space:]] ]]; then
+            full_command="$full_command \"$arg\""
+        else
+            full_command="$full_command $arg"
+        fi
+    done
+    export full_command
+    
     # Debug output before parse_args
     if [ "$DEBUG" = "true" ]; then
         echo "DEBUG: Before parse_args"
+        echo "DEBUG: Full command: $full_command"
         echo "DEBUG: CPU_ENABLED: $CPU_ENABLED"
         echo "DEBUG: MEMORY_ENABLED: $MEMORY_ENABLED"
         echo "DEBUG: IO_ENABLED: $IO_ENABLED"
@@ -3446,7 +3465,7 @@ main() {
                     # Support new SYSBENCH_PROFILES and IO_PATH parameters with backward compatibility
                     remote_command="$remote_command CPU_THREADS=\"$CPU_THREADS\" CPU_MAX_PRIME=\"$CPU_MAX_PRIME\""
                     remote_command="$remote_command MEMORY_THREADS=\"$MEMORY_THREADS\" MEMORY_BLOCK_SIZE=\"$MEMORY_BLOCK_SIZE\" MEMORY_TOTAL_SIZE=\"$MEMORY_TOTAL_SIZE\" MEMORY_OPER=\"$MEMORY_OPER\""
-                    remote_command="$remote_command IO_TOOL=\"$IO_TOOL\" IO_TOTAL_SIZE=\"$IO_TOTAL_SIZE\" SYSBENCH_PROFILES=\"${SYSBENCH_PROFILES:-rndrw}\" SYSBENCH_FILE_NUM=\"$SYSBENCH_FILE_NUM\" SYSBENCH_DURATION=\"$SYSBENCH_DURATION\" IO_PATH=\"${IO_PATH:-${IO_TEST_PATH:-$HOME/oscheckperf/io_test}}\" FIO_DURATION=\"$FIO_DURATION\""
+                    remote_command="$remote_command IO_TOOL=\"$IO_TOOL\" IO_TOTAL_SIZE=\"$IO_TOTAL_SIZE\" SYSBENCH_PROFILES=\"${SYSBENCH_PROFILES:-rndrw}\" SYSBENCH_FILE_NUM=\"$SYSBENCH_FILE_NUM\" SYSBENCH_DURATION=\"$SYSBENCH_DURATION\" IO_PATH=\"${IO_PATH:-$HOME/oscheckperf/io_test}\" FIO_DURATION=\"$FIO_DURATION\""
                     remote_command="$remote_command THREADS_THREADS=\"$THREADS_THREADS\" THREADS_YIELDS=\"$THREADS_YIELDS\" THREADS_LOCKS=\"$THREADS_LOCKS\""
                     remote_command="$remote_command MUTEX_THREADS=\"$MUTEX_THREADS\" MUTEX_NUM=\"$MUTEX_NUM\""
                     remote_command="$remote_command PGBENCH_DURATION=\"$PGBENCH_DURATION\" PGBENCH_CLIENTS=\"$PGBENCH_CLIENTS\" PGBENCH_THREADS=\"$PGBENCH_THREADS\" PGBENCH_SCALE=\"$PGBENCH_SCALE\" PGBENCH_DB=\"$PGBENCH_DB\""
@@ -3484,16 +3503,16 @@ main() {
                                 remote_test_command="$remote_test_command IO_TOOL=$IO_TOOL"
                                 if [ "$IO_TOOL" = "fio" ]; then
                                     remote_test_command="$remote_test_command FIO_DURATION=${FIO_DURATION:-$DURATION}"
-                                    remote_test_command="$remote_test_command FSYSBENCH_PROFILES=\"${FSYSBENCH_PROFILES:-randrw}\""
+                                    remote_test_command="$remote_test_command FIO_PROFILES='${FIO_PROFILES:-randrw}'"
                                     remote_test_command="$remote_test_command FIO_BS=${FIO_BS:-8K}"
                                     remote_test_command="$remote_test_command FIO_IODEPTH=${FIO_IODEPTH:-64}"
                                     remote_test_command="$remote_test_command FIO_NUMJOBS=${FIO_NUMJOBS:-4}"
                                     remote_test_command="$remote_test_command FIO_DIRECT=${FIO_DIRECT:-1}"
                                 else
-                                    remote_test_command="$remote_test_command SYSBENCH_PROFILES=\"${SYSBENCH_PROFILES:-rndrw}\""
+                                    remote_test_command="$remote_test_command SYSBENCH_PROFILES='${SYSBENCH_PROFILES:-rndrw}'"
                                 fi
                                 # Support new IO_PATH parameter with backward compatibility
-                                remote_test_command="$remote_test_command IO_TOTAL_SIZE=${IO_TOTAL_SIZE:-1G} SYSBENCH_FILE_NUM=${SYSBENCH_FILE_NUM:-1} SYSBENCH_DURATION=${SYSBENCH_DURATION:-$DURATION} IO_PATH=${IO_PATH:-${IO_TEST_PATH:-$HOME/oscheckperf/io_test}}"
+                                remote_test_command="$remote_test_command IO_TOTAL_SIZE=${IO_TOTAL_SIZE:-1G} SYSBENCH_FILE_NUM=${SYSBENCH_FILE_NUM:-1} SYSBENCH_DURATION=${SYSBENCH_DURATION:-$DURATION} IO_PATH='${IO_PATH:-$HOME/oscheckperf/io_test}'"
                             fi
                         fi
                         

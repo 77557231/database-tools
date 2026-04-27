@@ -4,3 +4,5 @@ output/
 sysbench-*/
 tools/oscheckperf_push_all.sh
 tools/oscheckperf_test.sh
+tools/oscheckperf_validate_logs.sh
+test*
