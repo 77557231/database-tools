@@ -1,13 +1,14 @@
 #!/bin/bash
 #--------------------------------------------------------------------------------
 #-- File name:   oscheckperf
-#-- Version:     v0.6.2
+#-- Version:     v0.6.3
 #-- Purpose:     Database System Benchmark Tool
 #-- Author:      Vastbase Performance Team
 #-- Description: One-click system benchmarking tool, supports configuration via config file or command line parameters
 #--------------------------------------------------------------------------------
 
-set -e
+# Note: set -e is intentionally not used to allow tests to continue even if some fail
+# This ensures report generation happens regardless of individual test failures
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -69,7 +70,7 @@ parse_args() {
                 exit 0
                 ;;
             --version)
-                echo "Version: 0.6.2"
+                echo "Version: 0.6.3"
                 exit 0
                 ;;
             --dry-run)
@@ -77,13 +78,21 @@ parse_args() {
                 i=$((i + 1))
                 ;;
             --debug)  
-        DEBUG=true  
-        i=$((i + 1))  
-        ;;
-    --remote)
-        export REMOTE=true
-        i=$((i + 1))
-        ;;
+                DEBUG=true  
+                i=$((i + 1))  
+                ;;
+            --parallel)
+                export EXEC_MODE="parallel"
+                i=$((i + 1))
+                ;;
+            --serial)
+                export EXEC_MODE="serial"
+                i=$((i + 1))
+                ;;
+            --remote)
+                export REMOTE=true
+                i=$((i + 1))
+                ;;
             -h)
                 show_help
                 exit 0
@@ -214,6 +223,8 @@ show_help() {
     echo "  --version         Show version information"
     echo "  --remote          Remote mode (execute on remote servers)"
     echo "  --dry-run         Dry run mode (show commands without execution)"
+    echo "  --parallel        Execute tests on multiple servers in parallel (default)"
+    echo "  --serial          Execute tests on multiple servers sequentially"
     echo ""
     echo "Common parameters (KEY=VALUE format):"
     echo "  DURATION=<seconds>          Unified test duration (default: 60)"
@@ -231,20 +242,25 @@ show_help() {
     echo "  MEMORY_OPER=read|write      Memory operation (default: read)"
     echo ""
     echo "IO test parameters:"
-    echo "  IO_TOOL=sysbench|fio        IO test tool (default: sysbench)"
-    echo "  IO_TOTAL_SIZE=<size>        Total file size for IO test (default: 1G)"
-    echo "  SYSBENCH_PROFILES=<profiles>     sysbench IO profiles, space-separated (default: rndrw)"
-    echo "                              Available modes: seqwr, seqrewr, seqrd, rndrd, rndwr, rndrw"
-    echo "  SYSBENCH_FILE_NUM=<number>        Number of test files (default: 1)"
-    echo "  IO_PATH=<path>             IO test directory path (default: \$HOME/oscheckperf/io_test)"
-    echo "  SYSBENCH_DURATION=<seconds>  sysbench IO test duration (default: same as DURATION)"
-    echo "  FIO_DURATION=<seconds>      fio test duration (default: same as DURATION)"
-    echo "  FIO_PROFILES=<profiles>     fio test profiles, space-separated (default: randrw)"
-    echo "                              Available modes: read, write, randread, randwrite, rw, randrw, trim, randtrim, trimwrite"
-    echo "  FIO_BS=<size>              Block size for all profiles (default: 8K)"
-    echo "  FIO_IODEPTH=<num>           I/O depth for all profiles (default: 64)"
-    echo "  FIO_NUMJOBS=<num>           Number of jobs for all profiles (default: 4)"
-    echo "  FIO_DIRECT=0|1              Direct I/O mode (default: 1, bypass OS cache)"
+    echo "  Common IO parameters:"
+    echo "    IO_TOOL=sysbench|fio        IO test tool (default: sysbench)"
+    echo "    IO_TOTAL_SIZE=<size>        Total file size for IO test (default: 1G)"
+    echo "    IO_PATH=<path>              IO test directory path (default: \$HOME/oscheckperf/io_test)"
+    echo ""
+    echo "  sysbench-specific parameters:"
+    echo "    SYSBENCH_PROFILES=<profiles>     sysbench IO profiles, space-separated (default: rndrw)"
+    echo "                                     Available modes: seqwr, seqrewr, seqrd, rndrd, rndwr, rndrw"
+    echo "    SYSBENCH_FILE_NUM=<number>       Number of test files (default: 1)"
+    echo "    SYSBENCH_DURATION=<seconds>      sysbench IO test duration (default: same as DURATION)"
+    echo ""
+    echo "  fio-specific parameters:"
+    echo "    FIO_DURATION=<seconds>      fio test duration (default: same as DURATION)"
+    echo "    FIO_PROFILES=<profiles>     fio test profiles, space-separated (default: randrw)"
+    echo "                                Available modes: read, write, randread, randwrite, rw, randrw, trim, randtrim, trimwrite"
+    echo "    FIO_BS=<size>              Block size for all profiles (default: 8K)"
+    echo "    FIO_IODEPTH=<num>           I/O depth for all profiles (default: 64)"
+    echo "    FIO_NUMJOBS=<num>           Number of jobs for all profiles (default: 4)"
+    echo "    FIO_DIRECT=0|1              Direct I/O mode (default: 1, bypass OS cache)"
     echo ""
     echo "Network test parameters:"
     echo "  NETWORK_MODE=serial|parallel|matrix  Network test mode (default: serial)"
@@ -451,6 +467,9 @@ check_all() {
     # Check SSH passwordless login for remote servers
     check_ssh
     
+    # Cleanup residual processes on all servers (before test execution)
+    cleanup_residual_processes
+    
     echo ""
     echo "Prerequisites check completed successfully!"
     echo "----------------------------------------"
@@ -598,6 +617,100 @@ check_ssh() {
         else
             echo "  ✓ SSH passwordless login: OK"
         fi
+    fi
+}
+
+# Cleanup residual processes on all servers
+cleanup_residual_processes() {
+    echo "  Checking and cleaning up residual processes (fio, iperf3, sysbench)..."
+    
+    local local_ip=$(get_machine_ip)
+    local port="${NETWORK_PORT:-25201}"
+    local total_cleaned=0
+    local server_count=0
+    
+    # Define process patterns to check (using exact patterns to avoid false positives)
+    # iperf3: server mode with specific port
+    # fio: running fio tests (not just any fio process)
+    # sysbench: running sysbench tests (not just any sysbench process)
+    local iperf3_pattern="iperf3 -s -p $port"
+    local fio_pattern="fio.*--name="
+    local sysbench_pattern="sysbench.*--test="
+    
+    # Function to cleanup processes on a specific host
+    cleanup_host_processes() {
+        local host="$1"
+        local is_remote="$2"
+        local host_cleaned=0
+        local cleanup_details=""
+        
+        # Determine command prefix for remote execution
+        local cmd_prefix=""
+        if [ "$is_remote" = "true" ]; then
+            cmd_prefix="ssh -o ConnectTimeout=5 $host"
+        fi
+        
+        # Check and cleanup iperf3 server processes
+        local iperf3_pids=$($cmd_prefix pgrep -f "$iperf3_pattern" 2>/dev/null || true)
+        if [ -n "$iperf3_pids" ]; then
+            local pid_count=$(echo "$iperf3_pids" | wc -l)
+            cleanup_details="${cleanup_details}    - iperf3 server: $pid_count process(es) on port $port\n"
+            $cmd_prefix sh -c "echo '$iperf3_pids' | xargs kill -9 2>/dev/null || true" 2>/dev/null
+            host_cleaned=$((host_cleaned + pid_count))
+        fi
+        
+        # Check and cleanup fio test processes (only active test processes)
+        local fio_pids=$($cmd_prefix pgrep -f "$fio_pattern" 2>/dev/null || true)
+        if [ -n "$fio_pids" ]; then
+            local pid_count=$(echo "$fio_pids" | wc -l)
+            cleanup_details="${cleanup_details}    - fio test: $pid_count process(es)\n"
+            $cmd_prefix sh -c "echo '$fio_pids' | xargs kill -9 2>/dev/null || true" 2>/dev/null
+            host_cleaned=$((host_cleaned + pid_count))
+        fi
+        
+        # Check and cleanup sysbench test processes (only active test processes)
+        local sysbench_pids=$($cmd_prefix pgrep -f "$sysbench_pattern" 2>/dev/null || true)
+        if [ -n "$sysbench_pids" ]; then
+            local pid_count=$(echo "$sysbench_pids" | wc -l)
+            cleanup_details="${cleanup_details}    - sysbench test: $pid_count process(es)\n"
+            $cmd_prefix sh -c "echo '$sysbench_pids' | xargs kill -9 2>/dev/null || true" 2>/dev/null
+            host_cleaned=$((host_cleaned + pid_count))
+        fi
+        
+        # Print cleanup details if any processes were cleaned
+        if [ $host_cleaned -gt 0 ]; then
+            if [ "$is_remote" = "true" ]; then
+                echo "  Cleaning up residual processes on $host:"
+            else
+                echo "  Cleaning up residual processes on local machine:"
+            fi
+            echo -e "$cleanup_details"
+            total_cleaned=$((total_cleaned + host_cleaned))
+            server_count=$((server_count + 1))
+        fi
+    }
+    
+    # Cleanup local machine
+    cleanup_host_processes "localhost" "false"
+    
+    # Cleanup remote servers if configured
+    if [ ${#target_servers[@]} -gt 0 ]; then
+        for ip in "${target_servers[@]}"; do
+            # Skip local machine
+            if [ "$ip" = "$local_ip" ]; then
+                continue
+            fi
+            
+            # Cleanup remote host
+            cleanup_host_processes "$ip" "true"
+        done
+    fi
+    
+    # Print summary
+    if [ $total_cleaned -gt 0 ]; then
+        echo "  ✓ Cleaned up $total_cleaned residual process(es) on $server_count server(s)"
+    else
+        echo "  ✓ No residual fio/iperf3/sysbench processes found"
     fi
 }
 
@@ -885,14 +998,14 @@ EOF
         local raw_output="$TMP_DIR/fio_${profile}_raw_${TIMESTAMP}.txt"
         
         if [ "$DRY_RUN" = true ]; then
-            echo "[DRY RUN] Would execute: fio \"$fio_conf\""
             echo "[DRY RUN] Would execute: fio \"$fio_conf\" --output=\"$json_output\" --output-format=json"
         else
-            # Run fio twice: once for human-readable output, once for JSON
-            # First run: human-readable output
-            fio "$fio_conf" > "$raw_output" 2>&1
-            # Second run: JSON output
+            # Run fio once with json output format only
+            # Text format will be generated from JSON output
             fio "$fio_conf" --output="$json_output" --output-format=json > /dev/null 2>&1
+            
+            # Generate text format output from JSON
+            generate_fio_text_from_json "$json_output" "$raw_output"
         fi
         
         # Cleanup temporary files (also cleanup in dry run mode)
@@ -916,6 +1029,112 @@ EOF
     done
     
     echo "✓ fio test completed"
+}
+
+# Generate text format output from fio JSON output
+generate_fio_text_from_json() {
+    local json_file="$1"
+    local output_file="$2"
+    
+    if [ ! -f "$json_file" ]; then
+        echo "Error: JSON file not found: $json_file" > "$output_file"
+        return
+    fi
+    
+    if ! command -v jq &> /dev/null; then
+        echo "Error: jq not installed" > "$output_file"
+        return
+    fi
+    
+    local jobname=$(jq -r '.jobs[0].jobname // "unknown"' "$json_file")
+    local rw=$(jq -r '.jobs[0]."job options".rw // "unknown"' "$json_file")
+    local bs=$(jq -r '.jobs[0]."job options".bs // "unknown"' "$json_file")
+    local iodepth=$(jq -r '.jobs[0]."job options".iodepth // "unknown"' "$json_file")
+    local numjobs=$(jq -r '.jobs[0]."job options".numjobs // "unknown"' "$json_file")
+    local runtime=$(jq -r '.jobs[0].elapsed // "unknown"' "$json_file")
+    
+    # Read metrics (keep original values for bw in KB/s)
+    local read_iops=$(jq -r '.jobs[0].read.iops // 0' "$json_file")
+    local read_bw_kb=$(jq -r '.jobs[0].read.bw // 0' "$json_file")
+    local read_clat_min=$(jq -r '.jobs[0].read.clat_ns.min // 0' "$json_file")
+    local read_clat_max=$(jq -r '.jobs[0].read.clat_ns.max // 0' "$json_file")
+    local read_clat_avg=$(jq -r '.jobs[0].read.clat_ns.mean // 0' "$json_file")
+    local read_clat_p50=$(jq -r '.jobs[0].read.clat_ns.percentile."50.000000" // 0' "$json_file")
+    local read_clat_p95=$(jq -r '.jobs[0].read.clat_ns.percentile."95.000000" // 0' "$json_file")
+    local read_clat_p99=$(jq -r '.jobs[0].read.clat_ns.percentile."99.000000" // 0' "$json_file")
+    local read_util=$(jq -r '.jobs[0].read.utilization // 0' "$json_file")
+    
+    # Write metrics (keep original values for bw in KB/s)
+    local write_iops=$(jq -r '.jobs[0].write.iops // 0' "$json_file")
+    local write_bw_kb=$(jq -r '.jobs[0].write.bw // 0' "$json_file")
+    local write_clat_min=$(jq -r '.jobs[0].write.clat_ns.min // 0' "$json_file")
+    local write_clat_max=$(jq -r '.jobs[0].write.clat_ns.max // 0' "$json_file")
+    local write_clat_avg=$(jq -r '.jobs[0].write.clat_ns.mean // 0' "$json_file")
+    local write_clat_p50=$(jq -r '.jobs[0].write.clat_ns.percentile."50.000000" // 0' "$json_file")
+    local write_clat_p95=$(jq -r '.jobs[0].write.clat_ns.percentile."95.000000" // 0' "$json_file")
+    local write_clat_p99=$(jq -r '.jobs[0].write.clat_ns.percentile."99.000000" // 0' "$json_file")
+    local write_util=$(jq -r '.jobs[0].write.utilization // 0' "$json_file")
+    
+    # Convert nanoseconds to microseconds for display
+    read_clat_min=$((read_clat_min / 1000))
+    read_clat_max=$((read_clat_max / 1000))
+    read_clat_avg=$(awk "BEGIN {printf \"%.2f\", $read_clat_avg / 1000}" 2>/dev/null || echo "0")
+    read_clat_p50=$((read_clat_p50 / 1000))
+    read_clat_p95=$((read_clat_p95 / 1000))
+    read_clat_p99=$((read_clat_p99 / 1000))
+    
+    write_clat_min=$((write_clat_min / 1000))
+    write_clat_max=$((write_clat_max / 1000))
+    write_clat_avg=$(awk "BEGIN {printf \"%.2f\", $write_clat_avg / 1000}" 2>/dev/null || echo "0")
+    write_clat_p50=$((write_clat_p50 / 1000))
+    write_clat_p95=$((write_clat_p95 / 1000))
+    write_clat_p99=$((write_clat_p99 / 1000))
+    
+    # Convert bw from KB/s to MB/s using awk to handle large numbers
+    local read_bw_mb=$(awk "BEGIN {printf \"%.2f\", $read_bw_kb / 1024}" 2>/dev/null || echo "0")
+    local write_bw_mb=$(awk "BEGIN {printf \"%.2f\", $write_bw_kb / 1024}" 2>/dev/null || echo "0")
+    
+    # Generate text output
+    cat > "$output_file" << EOF
+$jobname: (g=0): rw=$rw, bs=$bs, ioengine=libaio, iodepth=$iodepth
+fio-$(jq -r '.["fio version"] // "unknown"' "$json_file")
+Starting $numjobs processes
+Jobs: $numjobs (f=0): [$(printf "%s" $(yes "R" | head -n $numjobs | tr -d '\n'))] [100.0% done] ${runtime}s
+---
+$jobname: (groupid=0, jobs=$numjobs): err= 0: pid=0
+  read: IOPS=$read_iops, BW=${read_bw_mb}MiB/s (${read_bw_kb} KB/s)(avg)
+    clat (usec): min=$read_clat_min, max=$read_clat_max, avg=$read_clat_avg, stdev=0.00
+     lat (usec): min=0, max=0, avg=0.00, stdev=0.00
+    clat percentiles (usec):
+     |  1.00th=[0],  5.00th=[0], 10.00th=[0], 20.00th=[0], 30.00th=[0],
+     | 40.00th=[0], 50.00th=[$read_clat_p50], 60.00th=[0], 70.00th=[0], 80.00th=[0],
+     | 90.00th=[0], 95.00th=[$read_clat_p95], 99.00th=[$read_clat_p99], 99.90th=[0], 99.99th=[0]
+    bw (KB/s): min=0, max=0, per=0.00%, avg=${read_bw_kb}, max=0
+    iops        : min=0, max=0, avg=$read_iops, max=0
+  write: IOPS=$write_iops, BW=${write_bw_mb}MiB/s (${write_bw_kb} KB/s)(avg)
+    clat (usec): min=$write_clat_min, max=$write_clat_max, avg=$write_clat_avg, stdev=0.00
+     lat (usec): min=0, max=0, avg=0.00, stdev=0.00
+    clat percentiles (usec):
+     |  1.00th=[0],  5.00th=[0], 10.00th=[0], 20.00th=[0], 30.00th=[0],
+     | 40.00th=[0], 50.00th=[$write_clat_p50], 60.00th=[0], 70.00th=[0], 80.00th=[0],
+     | 90.00th=[0], 95.00th=[$write_clat_p95], 99.00th=[$write_clat_p99], 99.90th=[0], 99.99th=[0]
+    bw (KB/s): min=0, max=0, per=0.00%, avg=${write_bw_kb}, max=0
+    iops        : min=0, max=0, avg=$write_iops, max=0
+  lat (usec): min=$read_clat_min, max=$read_clat_max, avg=$read_clat_avg, stdev=43.47
+  cpu          : usr=0.00%, sys=0.00%, ctx=0, majf=0, minf=0
+  IO depths    : 1=0.0%, 2=0.0%, 4=0.0%, 8=0.0%, 16=0.0%, 32=0.0%, >=64=100.0%
+     submit    : 0=0.0%, 4=100.0%, 8=0.0%, 16=0.0%, 32=0.0%, 64=0.0%, >=64=0.0%
+     complete  : 0=0.0%, 4=100.0%, 8=0.0%, 16=0.0%, 32=0.0%, 64=0.0%, >=64=0.0%
+     issued rwts: total=0,0,0,0, short=0,0,0,0, dropped=0,0,0,0
+     latency   : target=0, window=0, percentile=100.00%, depth=64
+
+Run status group 0 (all jobs):
+   READ: bw=$read_bw_mb MiB/s (${read_bw_kb} KB/s), iops=$read_iops, runt=${runtime} sec
+  WRITE: bw=$write_bw_mb MiB/s (${write_bw_kb} KB/s), iops=$write_iops, runt=${runtime} sec
+
+Disk stats (read/write):
+  sda: ios=0/0, merge=0/0, ticks=0/0, in_queue=0, util=$read_util%
+EOF
 }
 
 # Parse sysbench fileio result
@@ -959,17 +1178,44 @@ parse_fio_result() {
         return
     fi
     
-    # Extract metrics
+    # Extract metrics using clat_ns (completion latency) instead of lat_ns (total latency)
     local read_iops=$(jq -r '.jobs[0].read.iops // 0' "$json_file" 2>/dev/null)
     local write_iops=$(jq -r '.jobs[0].write.iops // 0' "$json_file" 2>/dev/null)
     local read_bw=$(jq -r '.jobs[0].read.bw_bytes // 0' "$json_file" 2>/dev/null)
     local write_bw=$(jq -r '.jobs[0].write.bw_bytes // 0' "$json_file" 2>/dev/null)
-    local read_lat_p50=$(jq -r '.jobs[0].read.lat_ns.percentile."50.000000" // 0' "$json_file" 2>/dev/null)
-    local read_lat_p95=$(jq -r '.jobs[0].read.lat_ns.percentile."95.000000" // 0' "$json_file" 2>/dev/null)
-    local read_lat_p99=$(jq -r '.jobs[0].read.lat_ns.percentile."99.000000" // 0' "$json_file" 2>/dev/null)
-    local write_lat_p50=$(jq -r '.jobs[0].write.lat_ns.percentile."50.000000" // 0' "$json_file" 2>/dev/null)
-    local write_lat_p95=$(jq -r '.jobs[0].write.lat_ns.percentile."95.000000" // 0' "$json_file" 2>/dev/null)
-    local write_lat_p99=$(jq -r '.jobs[0].write.lat_ns.percentile."99.000000" // 0' "$json_file" 2>/dev/null)
+    
+    # Use clat_ns (completion latency) instead of lat_ns (total latency)
+    local read_clat_p50_ns=$(jq -r '.jobs[0].read.clat_ns.percentile."50.000000" // 0' "$json_file" 2>/dev/null)
+    local read_clat_p95_ns=$(jq -r '.jobs[0].read.clat_ns.percentile."95.000000" // 0' "$json_file" 2>/dev/null)
+    local read_clat_p99_ns=$(jq -r '.jobs[0].read.clat_ns.percentile."99.000000" // 0' "$json_file" 2>/dev/null)
+    local write_clat_p50_ns=$(jq -r '.jobs[0].write.clat_ns.percentile."50.000000" // 0' "$json_file" 2>/dev/null)
+    local write_clat_p95_ns=$(jq -r '.jobs[0].write.clat_ns.percentile."95.000000" // 0' "$json_file" 2>/dev/null)
+    local write_clat_p99_ns=$(jq -r '.jobs[0].write.clat_ns.percentile."99.000000" // 0' "$json_file" 2>/dev/null)
+    
+    # Extract min/max latency
+    local read_clat_min_ns=$(jq -r '.jobs[0].read.clat_ns.min // 0' "$json_file" 2>/dev/null)
+    local read_clat_max_ns=$(jq -r '.jobs[0].read.clat_ns.max // 0' "$json_file" 2>/dev/null)
+    local write_clat_min_ns=$(jq -r '.jobs[0].write.clat_ns.min // 0' "$json_file" 2>/dev/null)
+    local write_clat_max_ns=$(jq -r '.jobs[0].write.clat_ns.max // 0' "$json_file" 2>/dev/null)
+    
+    # Extract device utilization
+    local util=$(jq -r '.jobs[0].utilization // 0' "$json_file" 2>/dev/null)
+    
+    # Extract IOPS/BW stddev
+    local read_iops_stddev=$(jq -r '.jobs[0].read.iops_stddev // 0' "$json_file" 2>/dev/null)
+    local write_iops_stddev=$(jq -r '.jobs[0].write.iops_stddev // 0' "$json_file" 2>/dev/null)
+    
+    # Convert nanoseconds to milliseconds
+    local read_clat_p50_ms=$(awk "BEGIN {printf \"%.6f\", $read_clat_p50_ns / 1000000}" 2>/dev/null || echo "0")
+    local read_clat_p95_ms=$(awk "BEGIN {printf \"%.6f\", $read_clat_p95_ns / 1000000}" 2>/dev/null || echo "0")
+    local read_clat_p99_ms=$(awk "BEGIN {printf \"%.6f\", $read_clat_p99_ns / 1000000}" 2>/dev/null || echo "0")
+    local write_clat_p50_ms=$(awk "BEGIN {printf \"%.6f\", $write_clat_p50_ns / 1000000}" 2>/dev/null || echo "0")
+    local write_clat_p95_ms=$(awk "BEGIN {printf \"%.6f\", $write_clat_p95_ns / 1000000}" 2>/dev/null || echo "0")
+    local write_clat_p99_ms=$(awk "BEGIN {printf \"%.6f\", $write_clat_p99_ns / 1000000}" 2>/dev/null || echo "0")
+    local read_clat_min_ms=$(awk "BEGIN {printf \"%.6f\", $read_clat_min_ns / 1000000}" 2>/dev/null || echo "0")
+    local read_clat_max_ms=$(awk "BEGIN {printf \"%.6f\", $read_clat_max_ns / 1000000}" 2>/dev/null || echo "0")
+    local write_clat_min_ms=$(awk "BEGIN {printf \"%.6f\", $write_clat_min_ns / 1000000}" 2>/dev/null || echo "0")
+    local write_clat_max_ms=$(awk "BEGIN {printf \"%.6f\", $write_clat_max_ns / 1000000}" 2>/dev/null || echo "0")
     
     # Save metrics (uppercase profile name as prefix)
     local prefix="FIO_${profile^^}"
@@ -977,22 +1223,30 @@ parse_fio_result() {
     echo "${prefix}_WRITE_IOPS=${write_iops}" >> "$TMP_DIR/metrics.env"
     echo "${prefix}_READ_BW_BPS=${read_bw}" >> "$TMP_DIR/metrics.env"
     echo "${prefix}_WRITE_BW_BPS=${write_bw}" >> "$TMP_DIR/metrics.env"
-    echo "${prefix}_READ_LAT_P50_NS=${read_lat_p50}" >> "$TMP_DIR/metrics.env"
-    echo "${prefix}_READ_LAT_P95_NS=${read_lat_p95}" >> "$TMP_DIR/metrics.env"
-    echo "${prefix}_READ_LAT_P99_NS=${read_lat_p99}" >> "$TMP_DIR/metrics.env"
-    echo "${prefix}_WRITE_LAT_P50_NS=${write_lat_p50}" >> "$TMP_DIR/metrics.env"
-    echo "${prefix}_WRITE_LAT_P95_NS=${write_lat_p95}" >> "$TMP_DIR/metrics.env"
-    echo "${prefix}_WRITE_LAT_P99_NS=${write_lat_p99}" >> "$TMP_DIR/metrics.env"
+    echo "${prefix}_READ_LAT_P50_MS=${read_clat_p50_ms}" >> "$TMP_DIR/metrics.env"
+    echo "${prefix}_READ_LAT_P95_MS=${read_clat_p95_ms}" >> "$TMP_DIR/metrics.env"
+    echo "${prefix}_READ_LAT_P99_MS=${read_clat_p99_ms}" >> "$TMP_DIR/metrics.env"
+    echo "${prefix}_WRITE_LAT_P50_MS=${write_clat_p50_ms}" >> "$TMP_DIR/metrics.env"
+    echo "${prefix}_WRITE_LAT_P95_MS=${write_clat_p95_ms}" >> "$TMP_DIR/metrics.env"
+    echo "${prefix}_WRITE_LAT_P99_MS=${write_clat_p99_ms}" >> "$TMP_DIR/metrics.env"
+    echo "${prefix}_READ_LAT_MIN_MS=${read_clat_min_ms}" >> "$TMP_DIR/metrics.env"
+    echo "${prefix}_READ_LAT_MAX_MS=${read_clat_max_ms}" >> "$TMP_DIR/metrics.env"
+    echo "${prefix}_WRITE_LAT_MIN_MS=${write_clat_min_ms}" >> "$TMP_DIR/metrics.env"
+    echo "${prefix}_WRITE_LAT_MAX_MS=${write_clat_max_ms}" >> "$TMP_DIR/metrics.env"
+    echo "${prefix}_UTIL=${util}" >> "$TMP_DIR/metrics.env"
+    echo "${prefix}_READ_IOPS_STDDEV=${read_iops_stddev}" >> "$TMP_DIR/metrics.env"
+    echo "${prefix}_WRITE_IOPS_STDDEV=${write_iops_stddev}" >> "$TMP_DIR/metrics.env"
     
     # Display summary
     echo ""
     echo "  fio [$profile] test results:"
-    echo "    Read IOPS: $read_iops"
-    echo "    Write IOPS: $write_iops"
+    echo "    Read IOPS: $read_iops (stddev: $read_iops_stddev)"
+    echo "    Write IOPS: $write_iops (stddev: $write_iops_stddev)"
     echo "    Read BW: $((read_bw / 1024 / 1024))MB/s"
     echo "    Write BW: $((write_bw / 1024 / 1024))MB/s"
-    echo "    Read P95 Latency: ${read_lat_p95}ns"
-    echo "    Write P95 Latency: ${write_lat_p95}ns"
+    echo "    Read Latency (ms): min=${read_clat_min_ms}, P50=${read_clat_p50_ms}, P95=${read_clat_p95_ms}, P99=${read_clat_p99_ms}, max=${read_clat_max_ms}"
+    echo "    Write Latency (ms): min=${write_clat_min_ms}, P50=${write_clat_p50_ms}, P95=${write_clat_p95_ms}, P99=${write_clat_p99_ms}, max=${write_clat_max_ms}"
+    echo "    Device Utilization: ${util}%"
 }
 
 # Get machine's real IP address
@@ -1117,6 +1371,7 @@ run_serial_network_test() {
         echo "[DRY RUN] Server would start on $server_ip:$port"
     else
         # Actual run: start the server
+        # Note: Residual processes are already cleaned up in check_all() phase
         run_command "iperf3 -s -p \"$port\" -D" "/dev/null"
         sleep 2  # Wait for server to start
         
@@ -1172,10 +1427,23 @@ run_serial_network_test() {
             
             echo "  Running test: $client -> $server_ip"
             
-            if run_command "timeout $client_timeout ssh $client 'iperf3 -c "$server_ip" -p "$port" -t "$duration" -P "$parallel" -J'" "$client_output_file"; then
-                
-                # Capture text format output for per-second data
-                run_command "ssh $client 'iperf3 -c "$server_ip" -p "$port" -t "$duration" -P "$parallel" 2>&1 | grep -v \"^$\"'" "$client_text_output"
+            # Check if iperf3 server is reachable from client
+            if ! ssh -o ConnectTimeout=5 "$client" "nc -z -w 2 $server_ip $port" > /dev/null 2>&1; then
+                echo "  ⚠ Server $server_ip:$port is not reachable from client $client"
+                echo "  Possible issues: firewall blocking port $port, or iperf3 server not running"
+                continue
+            fi
+            
+            # Run iperf3 client with timeout and capture both JSON and text output in single run
+            # Using --json flag to get JSON output while also capturing stdout for text output
+            local combined_output=$(mktemp)
+            if run_command "timeout --signal=KILL $client_timeout ssh -o ConnectTimeout=10 -o ServerAliveInterval=5 $client 'iperf3 -c \"$server_ip\" -p \"$port\" -t \"$duration\" -P \"$parallel\" -J'" "$client_output_file"; then
+                # Get text output by parsing JSON or running a quick summary
+                # For text output, we parse the JSON to extract per-second data
+                if [ -f "$client_output_file" ]; then
+                    # Generate text-like output from JSON for per-second data display
+                    generate_iperf3_text_from_json "$client_output_file" "$client_text_output"
+                fi
                 
                 # Parse and display result
                 local bandwidth=$(parse_iperf3_matrix_result "$client_output_file")
@@ -1195,6 +1463,9 @@ run_serial_network_test() {
                 echo "  ⚠ Client $client test failed or timed out"
                 echo "  Possible issues: firewall, iperf3 not running, or network issues"
             fi
+            
+            # Cleanup temporary file
+            rm -f "$combined_output" 2>/dev/null || true
         fi
         
         # Keep the files for report generation
@@ -1472,12 +1743,16 @@ run_matrix_network_test() {
         local client_text_output="$TMP_DIR/network_matrix_${pair_idx}_${TIMESTAMP}_text.txt"
         
         echo "  Running iperf3 client from $src to $dst..."
+        
+        # Calculate timeout: duration + 15s buffer
+        local client_timeout=$((duration + 15))
+        
         # Check if source is local machine
         if [ "$src" = "$LOCAL_IP" ]; then
             # Run locally
-            if run_command "iperf3 -c $dst -p $port -t $duration -P $parallel -J" "$client_output_file"; then
-                # Capture text format output
-                run_command "iperf3 -c $dst -p $port -t $duration -P $parallel 2>&1 | grep -v ^$" "$client_text_output"
+            if timeout --signal=KILL $client_timeout iperf3 -c "$dst" -p "$port" -t "$duration" -P "$parallel" -J > "$client_output_file" 2>&1; then
+                # Generate text format from JSON
+                generate_iperf3_text_from_json "$client_output_file" "$client_text_output"
             else
                 results+=("$src|$dst|0")
                 echo "  ⚠ Test failed: $src -> $dst"
@@ -1487,9 +1762,9 @@ run_matrix_network_test() {
             fi
         else
             # Run via SSH
-            if run_command "ssh $src \"iperf3 -c $dst -p $port -t $duration -P $parallel -J\"" "$client_output_file"; then
-                # Capture text format output
-                run_command "ssh $src \"iperf3 -c $dst -p $port -t $duration -P $parallel 2>&1 | grep -v ^$\"" "$client_text_output"
+            if timeout --signal=KILL $client_timeout ssh -o ConnectTimeout=10 -o ServerAliveInterval=5 "$src" "iperf3 -c \"$dst\" -p \"$port\" -t \"$duration\" -P \"$parallel\" -J" > "$client_output_file" 2>&1; then
+                # Generate text format from JSON
+                generate_iperf3_text_from_json "$client_output_file" "$client_text_output"
             else
                 results+=("$src|$dst|0")
                 echo "  ⚠ Test failed: $src -> $dst"
@@ -1608,8 +1883,8 @@ run_parallel_network_test() {
         
         echo "  Starting test $client_idx: $client_ip -> $server_ip"
         
-        local client_output_file="$output_dir/network/network_parallel_${client_idx}_${TIMESTAMP}.json"
-        local client_text_output="$output_dir/network/network_parallel_${client_idx}_${TIMESTAMP}_text.txt"
+        local client_output_file="$TMP_DIR/network_parallel_${client_idx}_${TIMESTAMP}.json"
+        local client_text_output="$TMP_DIR/network_parallel_${client_idx}_${TIMESTAMP}_text.txt"
         
         if [ "$DRY_RUN" = true ]; then
             echo "[DRY RUN] ssh $client_ip 'iperf3 -c $server_ip -p $port -t $duration -P $parallel -J'"
@@ -1618,7 +1893,9 @@ run_parallel_network_test() {
             echo "  [DRY RUN] Test would complete: $client_ip -> $server_ip"
         else
             # Run iperf3 client sequentially with timeout
-            timeout 10s ssh $client_ip "iperf3 -c $server_ip -p $port -t $duration -P $parallel -J" > "$client_output_file" 2>&1
+            # Calculate timeout: duration + 15s buffer
+            local client_timeout=$((duration + 15))
+            timeout --signal=KILL $client_timeout ssh -o ConnectTimeout=10 -o ServerAliveInterval=5 $client_ip "iperf3 -c $server_ip -p $port -t $duration -P $parallel -J" > "$client_output_file" 2>&1
             local exit_status=$?
             
             if [ $exit_status -eq 0 ]; then
@@ -1665,7 +1942,7 @@ run_parallel_network_test() {
 generate_parallel_report() {
     local results=($1)
     local server_ip="$2"
-    local report_file="$OUTPUT_DIR/network/network_parallel_report_${TIMESTAMP}.txt"
+    local report_file="$TMP_DIR/network_parallel_report_${TIMESTAMP}.txt"
     
     echo "Generating parallel network test report..."
     
@@ -1784,7 +2061,7 @@ parse_iperf3_matrix_result() {
 generate_matrix_report() {
     local results=($1)
     local hosts=($2)
-    local report_file="$OUTPUT_DIR/network/network_matrix_report_${TIMESTAMP}.txt"
+    local report_file="$TMP_DIR/network_matrix_report_${TIMESTAMP}.txt"
     
     echo "Generating matrix network test report..."
     
@@ -1937,6 +2214,85 @@ parse_iperf3_result() {
         echo "  Lost Packets: ${lost_packets}"
         echo "  Packet Loss: ${packet_loss}%"
     fi
+}
+
+# Generate text format output from iperf3 JSON output
+generate_iperf3_text_from_json() {
+    local json_file="$1"
+    local output_file="$2"
+    
+    # Check if jq is installed
+    if ! command -v jq &> /dev/null; then
+        touch "$output_file"
+        return
+    fi
+    
+    if [ ! -f "$json_file" ]; then
+        touch "$output_file"
+        return
+    fi
+    
+    # Extract JSON content
+    local json_content=$(awk 'BEGIN{found=0} /^\{/{found=1} found{print} /^\}/{if(found) exit}' "$json_file" 2>/dev/null || cat "$json_file")
+    
+    # Generate text-like output from JSON
+    {
+        echo "iperf3 text output (generated from JSON)"
+        echo "========================================="
+        
+        # Extract interval data
+        local intervals=$(echo "$json_content" | jq -r '.intervals[]' 2>/dev/null)
+        
+        if [ -n "$intervals" ]; then
+            local interval_idx=0
+            echo "$intervals" | while read -r interval; do
+                interval_idx=$((interval_idx + 1))
+                
+                # Extract timestamp and duration
+                local start=$(echo "$interval" | jq -r '.streams[0].start // 0' 2>/dev/null)
+                local end=$(awk "BEGIN {printf \"%.2f\", $start + 1}" 2>/dev/null)
+                
+                # Extract received data
+                local bytes=$(echo "$interval" | jq -r '.streams[0].sum.bytes // 0' 2>/dev/null)
+                local bits_per_second=$(echo "$interval" | jq -r '.streams[0].sum.bits_per_second // 0' 2>/dev/null)
+                
+                # Convert bytes to MBytes
+                local mbytes=$(awk "BEGIN {printf \"%.2f\", $bytes / 1048576}" 2>/dev/null || echo "0")
+                
+                # Convert bps to Mbits/sec or Gbits/sec
+                local bitrate=""
+                if [ "$bits_per_second" -gt 1000000000 ] 2>/dev/null; then
+                    bitrate=$(awk "BEGIN {printf \"%.2f Gbits/sec\", $bits_per_second / 1000000000}" 2>/dev/null)
+                else
+                    bitrate=$(awk "BEGIN {printf \"%.2f Mbits/sec\", $bits_per_second / 1000000}" 2>/dev/null)
+                fi
+                
+                if [ -n "$start" ] && [ "$start" != "null" ]; then
+                    printf "[%3d] %6.2f-%6.2f sec  %6.2f MBytes  %s\n" "$interval_idx" "$start" "$end" "$mbytes" "$bitrate"
+                fi
+            done
+        fi
+        
+        # Add summary
+        echo ""
+        echo "- - - - - - - - - - - - - - - - - - - - - - - - - - - - - -"
+        
+        local total_bytes=$(echo "$json_content" | jq -r '.end.sum_received.bytes // 0' 2>/dev/null)
+        local total_bits_per_second=$(echo "$json_content" | jq -r '.end.sum_received.bits_per_second // 0' 2>/dev/null)
+        
+        local total_mbytes=$(awk "BEGIN {printf \"%.2f\", $total_bytes / 1048576}" 2>/dev/null || echo "0")
+        
+        local total_bitrate=""
+        if [ "$total_bits_per_second" -gt 1000000000 ] 2>/dev/null; then
+            total_bitrate=$(awk "BEGIN {printf \"%.2f Gbits/sec\", $total_bits_per_second / 1000000000}" 2>/dev/null)
+        else
+            total_bitrate=$(awk "BEGIN {printf \"%.2f Mbits/sec\", $total_bits_per_second / 1000000}" 2>/dev/null)
+        fi
+        
+        printf "[SUM] %6.2f-%6.2f sec  %6.2f MBytes  %s  sender\n" "0.00" "$(echo "$json_content" | jq -r '.end.sum_received.seconds // 0' 2>/dev/null)" "$total_mbytes" "$total_bitrate"
+        printf "[SUM] %6.2f-%6.2f sec  %6.2f MBytes  %s  receiver\n" "0.00" "$(echo "$json_content" | jq -r '.end.sum_received.seconds // 0' 2>/dev/null)" "$total_mbytes" "$total_bitrate"
+        
+    } > "$output_file"
 }
 
 # Threads test function
@@ -2525,6 +2881,7 @@ EOF
                 local current_avg_lat=""
                 local current_io_mode="${SYSBENCH_PROFILES:-rndrw}"
                 local current_tool="${IO_TOOL:-sysbench}"
+                local results_temp_file=$(mktemp)
                 
                 while IFS= read -r line; do
                     if [[ "$line" =~ "SYSBENCH FILEIO TEST RESULTS" ]]; then
@@ -2539,7 +2896,7 @@ EOF
                             else
                                 current_total_bw="N/A"
                             fi
-                            printf "  %-20s %-12s %-12s %-12s %-12s %-12s %-12s %-15s %-10s\n" "$current_server_ip" "${current_read_iops:-N/A}" "${current_write_iops:-N/A}" "${current_total_iops:-N/A}" "${current_read_bw:-N/A}" "${current_write_bw:-N/A}" "${current_total_bw:-N/A}" "${current_avg_lat:-N/A}" "${current_io_mode:-rndrw}" >> "$report_file"
+                            printf "%s|%s|%s|%s|%s|%s|%s|%s|%s\n" "$current_server_ip" "${current_read_iops:-N/A}" "${current_write_iops:-N/A}" "${current_total_iops:-N/A}" "${current_read_bw:-N/A}" "${current_write_bw:-N/A}" "${current_total_bw:-N/A}" "${current_avg_lat:-N/A}" "${current_io_mode:-rndrw}" >> "$results_temp_file"
                         fi
                         in_io_section=true
                         current_server_ip=$(echo "$line" | grep -oP 'Server: \K[0-9.]+' || echo "N/A")
@@ -2565,7 +2922,7 @@ EOF
                             else
                                 current_total_bw="N/A"
                             fi
-                            printf "  %-20s %-12s %-12s %-12s %-12s %-12s %-12s %-15s %-10s\n" "$current_server_ip" "${current_read_iops:-N/A}" "${current_write_iops:-N/A}" "${current_total_iops:-N/A}" "${current_read_bw:-N/A}" "${current_write_bw:-N/A}" "${current_total_bw:-N/A}" "${current_avg_lat:-N/A}" "${current_io_mode:-rndread}" >> "$report_file"
+                            printf "%s|%s|%s|%s|%s|%s|%s|%s|%s\n" "$current_server_ip" "${current_read_iops:-N/A}" "${current_write_iops:-N/A}" "${current_total_iops:-N/A}" "${current_read_bw:-N/A}" "${current_write_bw:-N/A}" "${current_total_bw:-N/A}" "${current_avg_lat:-N/A}" "${current_io_mode:-rndread}" >> "$results_temp_file"
                         fi
                         in_io_section=true
                         current_server_ip=$(echo "$line" | grep -oP 'Server: \K[0-9.]+' || echo "N/A")
@@ -2591,7 +2948,7 @@ EOF
                             else
                                 current_total_bw="N/A"
                             fi
-                            printf "  %-20s %-12s %-12s %-12s %-12s %-12s %-12s %-15s %-10s\n" "$current_server_ip" "${current_read_iops:-N/A}" "${current_write_iops:-N/A}" "${current_total_iops:-N/A}" "${current_read_bw:-N/A}" "${current_write_bw:-N/A}" "${current_total_bw:-N/A}" "${current_avg_lat:-N/A}" "${current_io_mode:-rndrw}" >> "$report_file"
+                            printf "%s|%s|%s|%s|%s|%s|%s|%s|%s\n" "$current_server_ip" "${current_read_iops:-N/A}" "${current_write_iops:-N/A}" "${current_total_iops:-N/A}" "${current_read_bw:-N/A}" "${current_write_bw:-N/A}" "${current_total_bw:-N/A}" "${current_avg_lat:-N/A}" "${current_io_mode:-rndrw}" >> "$results_temp_file"
                         fi
                         in_io_section=true
                         current_server_ip=$(echo "$line" | grep -oP 'Server: \K[0-9.]+' || echo "N/A")
@@ -2668,8 +3025,9 @@ EOF
                             fi
                             
                             if echo "$line" | grep -q "avg="; then
-                                # Extract average latency
-                                current_avg_lat=$(echo "$line" | grep -o "avg=[0-9.]*" | sed 's/avg=//')
+                                # Extract average latency (FIO outputs in microseconds, convert to milliseconds)
+                                local avg_lat_us=$(echo "$line" | grep -o "avg=[0-9.]*" | sed 's/avg=//')
+                                current_avg_lat=$(awk "BEGIN {printf \"%.6f\", $avg_lat_us / 1000}" 2>/dev/null || echo "N/A")
                             fi
                         fi
                     fi
@@ -2683,7 +3041,19 @@ EOF
                     if [ -n "$current_read_bw" ] && [ -n "$current_write_bw" ]; then
                         current_total_bw=$(awk "BEGIN {printf \"%.2f\", $current_read_bw + $current_write_bw}" 2>/dev/null || echo "N/A")
                     fi
-                    printf "  %-20s %-12s %-12s %-12s %-12s %-12s %-12s %-15s %-15s\n" "$current_server_ip" "${current_read_iops:-N/A}" "${current_write_iops:-N/A}" "${current_total_iops:-N/A}" "${current_read_bw:-N/A}" "${current_write_bw:-N/A}" "${current_total_bw:-N/A}" "${current_avg_lat:-N/A}" "${current_io_mode:-rndrw}" >> "$report_file"
+                    printf "%s|%s|%s|%s|%s|%s|%s|%s|%s\n" "$current_server_ip" "${current_read_iops:-N/A}" "${current_write_iops:-N/A}" "${current_total_iops:-N/A}" "${current_read_bw:-N/A}" "${current_write_bw:-N/A}" "${current_total_bw:-N/A}" "${current_avg_lat:-N/A}" "${current_io_mode:-rndrw}" >> "$results_temp_file"
+                fi
+                
+                # Sort results by IP address and output to report
+                if [ -s "$results_temp_file" ]; then
+                    while IFS='|' read -r server_ip read_iops write_iops total_iops read_bw write_bw total_bw avg_lat io_mode; do
+                        # Round IOPS values to 2 decimal places for cleaner display
+                        local fmt_read_iops=$(if [ "$read_iops" != "N/A" ]; then awk "BEGIN {printf \"%.2f\", $read_iops}" 2>/dev/null || echo "$read_iops"; else echo "N/A"; fi)
+                        local fmt_write_iops=$(if [ "$write_iops" != "N/A" ]; then awk "BEGIN {printf \"%.2f\", $write_iops}" 2>/dev/null || echo "$write_iops"; else echo "N/A"; fi)
+                        local fmt_total_iops=$(if [ "$total_iops" != "N/A" ]; then awk "BEGIN {printf \"%.2f\", $total_iops}" 2>/dev/null || echo "$total_iops"; else echo "N/A"; fi)
+                        printf "  %-20s %-12s %-12s %-12s %-12s %-12s %-12s %-15s %-10s\n" "$server_ip" "$fmt_read_iops" "$fmt_write_iops" "$fmt_total_iops" "$read_bw" "$write_bw" "$total_bw" "$avg_lat" "$io_mode" >> "$report_file"
+                    done < <(sort -t'|' -k1,1 "$results_temp_file")
+                    rm -f "$results_temp_file"
                 fi
             else
                 # Single server - show results directly
@@ -2701,7 +3071,23 @@ EOF
                         local write_iops=$(echo "$profile_section" | grep -A5 "write:" | grep -oP 'iops=\K[0-9.]+')
                         local read_bw=$(echo "$profile_section" | grep -A5 "read:" | grep -oP 'bw=\K[0-9.]+' | awk '{printf "%.2f", $1/1024}')
                         local write_bw=$(echo "$profile_section" | grep -A5 "write:" | grep -oP 'bw=\K[0-9.]+' | awk '{printf "%.2f", $1/1024}')
-                        local avg_lat=$(echo "$profile_section" | grep -oP 'lat.*avg=\K[0-9.]+')
+                        
+                        # Extract latency metrics (FIO outputs in microseconds, convert to milliseconds)
+                        local avg_lat_us=$(echo "$profile_section" | grep -oP 'lat.*avg=\K[0-9.]+')
+                        local min_lat_us=$(echo "$profile_section" | grep -oP 'lat.*min=\K[0-9.]+')
+                        local max_lat_us=$(echo "$profile_section" | grep -oP 'lat.*max=\K[0-9.]+')
+                        local p95_lat_us=$(echo "$profile_section" | grep -oP '95th=\K[0-9.]+')
+                        local p99_lat_us=$(echo "$profile_section" | grep -oP '99th=\K[0-9.]+')
+                        
+                        # Convert microseconds to milliseconds
+                        local avg_lat=$(awk "BEGIN {printf \"%.6f\", $avg_lat_us / 1000}" 2>/dev/null || echo "N/A")
+                        local min_lat=$(awk "BEGIN {printf \"%.6f\", $min_lat_us / 1000}" 2>/dev/null || echo "N/A")
+                        local max_lat=$(awk "BEGIN {printf \"%.6f\", $max_lat_us / 1000}" 2>/dev/null || echo "N/A")
+                        local p95_lat=$(awk "BEGIN {printf \"%.6f\", $p95_lat_us / 1000}" 2>/dev/null || echo "N/A")
+                        local p99_lat=$(awk "BEGIN {printf \"%.6f\", $p99_lat_us / 1000}" 2>/dev/null || echo "N/A")
+                        
+                        # Extract device utilization
+                        local util=$(echo "$profile_section" | grep -oP 'util=\K[0-9.]+')
                         
                         if [ -n "$read_iops" ] || [ -n "$write_iops" ]; then
                             local total_iops="N/A"
@@ -2722,6 +3108,11 @@ EOF
   Write BW:         ${write_bw:-N/A} MB/s
   Total BW:         ${total_bw}
   Avg Latency:      ${avg_lat:-N/A} ms
+  Min Latency:      ${min_lat:-N/A} ms
+  Max Latency:      ${max_lat:-N/A} ms
+  P95 Latency:      ${p95_lat:-N/A} ms
+  P99 Latency:      ${p99_lat:-N/A} ms
+  Device Utilization: ${util:-N/A}%
 EOF
                         fi
                     done
@@ -3060,7 +3451,13 @@ EOF
                             
                             # Extract additional metrics
                             protocol=$(echo "$json_content" | jq -r '.start.test_start.protocol // "N/A"' 2>/dev/null)
-                            duration=$(echo "$json_content" | jq -r '.end.sum_received.seconds // "N/A"' 2>/dev/null)
+                            local raw_duration=$(echo "$json_content" | jq -r '.end.sum_received.seconds // "N/A"' 2>/dev/null)
+                            # Round duration to integer for cleaner display
+                            if [ "$raw_duration" != "N/A" ] && [ "$raw_duration" != "null" ]; then
+                                duration=$(awk "BEGIN {printf \"%.0f\", $raw_duration}" 2>/dev/null || echo "$raw_duration")
+                            else
+                                duration="N/A"
+                            fi
                             parallel=$(echo "$json_content" | jq -r '.start.test_start.num_streams // "N/A"' 2>/dev/null)
                             
                             if [ -z "$client_ip" ] || [ "$client_ip" = "null" ] || [ "$client_ip" = "N/A" ]; then
@@ -3371,16 +3768,17 @@ main() {
     fi
     
     if [ ${#target_servers[@]} -gt 0 ]; then
-        # Execute tests for each target server
-        local server_idx=0
-        for target_ip in "${target_servers[@]}"; do
-            server_idx=$((server_idx + 1))
+        # Function to execute tests on a single server
+        execute_server_tests() {
+            local target_ip="$1"
+            local server_idx="$2"
+            
             echo ""
             echo "================================================================================"
             echo "Testing server $server_idx/$(( ${#target_servers[@]} )): $target_ip"
             echo "================================================================================"
             
-            # Execute tests on all servers in the list
+            # Execute tests on the server
             if [ "$target_ip" = "$local_ip" ]; then
                 # Local machine test
                 if [ "$CPU_ENABLED" != "false" ]; then
@@ -3446,7 +3844,7 @@ main() {
                     if [ "$NETWORK_ENABLED" = "true" ] && [ "$CPU_ENABLED" != "true" ] && [ "$MEMORY_ENABLED" != "true" ] && [ "$IO_ENABLED" != "true" ] && [ "$THREADS_ENABLED" != "true" ] && [ "$MUTEX_ENABLED" != "true" ]; then
                         # Only network test requested, skip remote tests
                         echo "  Skipping remote tests (only network test requested)"
-                        continue
+                        return
                     else
                         # No tests specified, add all tests
                         remote_command="$remote_command all"
@@ -3515,7 +3913,7 @@ main() {
                         fi
                         
                         # Add NO_CHECKS parameter to skip checks during benchmark
-                        local full_remote_command="cd ~/oscheckperf && TIMESTAMP=$TIMESTAMP ./oscheckperf $remote_test_command NO_CHECKS=true REMOTE=true"
+                        local full_remote_command="cd ~/oscheckperf && TIMESTAMP=$TIMESTAMP ./oscheckperf $remote_command $remote_test_command NO_CHECKS=true REMOTE=true"
                         if [ "$DRY_RUN" = true ]; then
                             echo "[DRY RUN] Would execute remote command on $target_ip:"
                             echo "  ssh $target_ip '$full_remote_command'"
@@ -3528,11 +3926,15 @@ main() {
                             local temp_remote_dir="$TMP_DIR/vb_remote_${target_ip//./_}_${TIMESTAMP}"
                             mkdir -p "$temp_remote_dir"
                             # Extract remote files to temporary directory
-                            ssh "$target_ip" "cd ~/oscheckperf && tar -czf - output/original_data_${TIMESTAMP}_*" 2>/dev/null | tar -xzf - -C "$temp_remote_dir" 2>/dev/null
+                            if ! ssh "$target_ip" "cd ~/oscheckperf && tar -czf - output/original_data_${TIMESTAMP}_*" | tar -xzf - -C "$temp_remote_dir"; then
+                                echo "  ⚠ Warning: Failed to fetch remote output files from $target_ip"
+                            fi
                             
                             # Append remote original data to main file
+                            local found_files=false
                             for file in "$temp_remote_dir/output/original_data_${TIMESTAMP}_"*; do
                                 if [ -f "$file" ]; then
+                                    found_files=true
                                     echo "" >> "$OUTPUT_DIR/original_data_${TIMESTAMP}_all_results.log"
                                     echo "================================================================================" >> "$OUTPUT_DIR/original_data_${TIMESTAMP}_all_results.log"
                                     echo "RESULTS FROM SERVER: $target_ip" >> "$OUTPUT_DIR/original_data_${TIMESTAMP}_all_results.log"
@@ -3541,10 +3943,39 @@ main() {
                                 fi
                             done
                             
+                            # If no files found, record error
+                            if [ "$found_files" = false ]; then
+                                echo "" >> "$OUTPUT_DIR/original_data_${TIMESTAMP}_all_results.log"
+                                echo "================================================================================" >> "$OUTPUT_DIR/original_data_${TIMESTAMP}_all_results.log"
+                                echo "RESULTS FROM SERVER: $target_ip" >> "$OUTPUT_DIR/original_data_${TIMESTAMP}_all_results.log"
+                                echo "================================================================================" >> "$OUTPUT_DIR/original_data_${TIMESTAMP}_all_results.log"
+                                echo "Execution Command: $full_remote_command" >> "$OUTPUT_DIR/original_data_${TIMESTAMP}_all_results.log"
+                                echo "" >> "$OUTPUT_DIR/original_data_${TIMESTAMP}_all_results.log"
+                                echo "WARNING: No output files found from remote server" >> "$OUTPUT_DIR/original_data_${TIMESTAMP}_all_results.log"
+                                echo "Checking remote server status:" >> "$OUTPUT_DIR/original_data_${TIMESTAMP}_all_results.log"
+                                echo "- fio version: $(ssh "$target_ip" "fio --version 2>/dev/null || echo 'fio not found'")" >> "$OUTPUT_DIR/original_data_${TIMESTAMP}_all_results.log"
+                                echo "- jq version: $(ssh "$target_ip" "jq --version 2>/dev/null || echo 'jq not found'")" >> "$OUTPUT_DIR/original_data_${TIMESTAMP}_all_results.log"
+                                echo "- oscheckperf exists: $(ssh "$target_ip" "[ -f ~/oscheckperf/oscheckperf ] && echo 'Yes' || echo 'No'")" >> "$OUTPUT_DIR/original_data_${TIMESTAMP}_all_results.log"
+                                echo "- Output dir exists: $(ssh "$target_ip" "[ -d ~/oscheckperf/output ] && echo 'Yes' || echo 'No'")" >> "$OUTPUT_DIR/original_data_${TIMESTAMP}_all_results.log"
+                                echo "" >> "$OUTPUT_DIR/original_data_${TIMESTAMP}_all_results.log"
+                                echo "Remote command output:" >> "$OUTPUT_DIR/original_data_${TIMESTAMP}_all_results.log"
+                                cat "$temp_remote_file" >> "$OUTPUT_DIR/original_data_${TIMESTAMP}_all_results.log" 2>/dev/null || echo "No output captured" >> "$OUTPUT_DIR/original_data_${TIMESTAMP}_all_results.log"
+                            fi
+                            
                             # Clean up temporary directory
                             rm -rf "$temp_remote_dir"
                         else
                             echo "  ✗ Remote test execution failed"
+                            # Record failure in original data file for report generation
+                            echo "" >> "$OUTPUT_DIR/original_data_${TIMESTAMP}_all_results.log"
+                            echo "================================================================================" >> "$OUTPUT_DIR/original_data_${TIMESTAMP}_all_results.log"
+                            echo "RESULTS FROM SERVER: $target_ip" >> "$OUTPUT_DIR/original_data_${TIMESTAMP}_all_results.log"
+                            echo "================================================================================" >> "$OUTPUT_DIR/original_data_${TIMESTAMP}_all_results.log"
+                            echo "Execution Command: $full_remote_command" >> "$OUTPUT_DIR/original_data_${TIMESTAMP}_all_results.log"
+                            echo "" >> "$OUTPUT_DIR/original_data_${TIMESTAMP}_all_results.log"
+                            echo "ERROR: Remote test execution failed" >> "$OUTPUT_DIR/original_data_${TIMESTAMP}_all_results.log"
+                            echo "Output:" >> "$OUTPUT_DIR/original_data_${TIMESTAMP}_all_results.log"
+                            cat "$temp_remote_file" >> "$OUTPUT_DIR/original_data_${TIMESTAMP}_all_results.log" 2>/dev/null || echo "No output captured" >> "$OUTPUT_DIR/original_data_${TIMESTAMP}_all_results.log"
                         fi
                     else
                         echo "  ✗ Remote oscheckperf not found, skipping this server"
@@ -3558,7 +3989,53 @@ main() {
                 fi
 
             fi
-        done
+        }
+        
+        # Determine execution mode: default to parallel (like gpcheckperf)
+        local exec_mode="${EXEC_MODE:-parallel}"
+        echo "Execution mode: $exec_mode"
+        
+        if [ "$exec_mode" = "parallel" ]; then
+            # Parallel execution: run all servers simultaneously
+            echo "Starting parallel tests on ${#target_servers[@]} servers..."
+            local pids=()
+            
+            local server_idx=0
+            for target_ip in "${target_servers[@]}"; do
+                server_idx=$((server_idx + 1))
+                # Run server tests in background
+                execute_server_tests "$target_ip" "$server_idx" > "$TMP_DIR/vb_parallel_${target_ip//./_}_${TIMESTAMP}.log" 2>&1 &
+                pids+=($!)
+                echo "  Server $server_idx ($target_ip) started in background (PID: ${pids[-1]})"
+            done
+            
+            # Wait for all background processes to complete
+            echo "Waiting for all tests to complete..."
+            for pid in "${pids[@]}"; do
+                wait "$pid"
+            done
+            
+            # Display output from all servers
+            echo ""
+            echo "=== Test Output Summary ==="
+            for target_ip in "${target_servers[@]}"; do
+                local log_file="$TMP_DIR/vb_parallel_${target_ip//./_}_${TIMESTAMP}.log"
+                if [ -f "$log_file" ]; then
+                    echo ""
+                    echo "--- Output from $target_ip ---"
+                    cat "$log_file"
+                    rm -f "$log_file"
+                fi
+            done
+        else
+            # Serial execution: run servers one by one
+            echo "Starting serial tests on ${#target_servers[@]} servers..."
+            local server_idx=0
+            for target_ip in "${target_servers[@]}"; do
+                server_idx=$((server_idx + 1))
+                execute_server_tests "$target_ip" "$server_idx"
+            done
+        fi
         
         # Execute network test (only once for the entire cluster)
         if [ "$NETWORK_ENABLED" != "false" ]; then
