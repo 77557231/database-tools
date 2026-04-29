@@ -16,14 +16,61 @@
 ## 项目结构
 
 ```
-oscheckperf/
+$HOME/oscheckperf/
 ├── oscheckperf              # 主入口脚本
-├── output/                   # 测试结果输出目录
+├── output/                   # 测试结果输出目录（当前目录下）
+│   ├── original_data_*_all_results.log  # 原始测试数据汇总
+│   ├── data_*_all_results.log           # 解析后的测试结果
+│   └── report_benchmark_*.log           # 最终性能报告
+├── tmp/                      # 临时文件目录
+│   ├── vb_fileio_*.txt       # sysbench fileio 测试输出
+│   ├── fio_*.fio             # fio 配置文件
+│   ├── fio_*_result_*.json   # fio JSON 测试结果
+│   └── network_*.json        # 网络测试 JSON 结果
+├── io_test/                  # IO测试数据目录
+│   ├── test_file.*           # sysbench 创建的测试文件（测试后自动清理）
+│   └── fio_test_file.*       # fio 创建的测试文件（保留）
 ├── tools/
 │   └── skill.md              # 开发规范文档
 ├── README.md                 # 中文文档（默认）
 └── README.en.md              # 英文文档
 ```
+
+### 目录结构说明
+
+| 目录 | 用途 | 默认路径 |
+|------|------|----------|
+| `output/` | 最终报告和日志（original_data*, data*, report_benchmark*） | `./output`（当前目录） |
+| `tmp/` | 临时文件（网络测试结果、fio JSON、sysbench 输出） | `$HOME/oscheckperf/tmp` |
+| `io_test/` | IO测试数据文件（sysbench/fio 创建的测试文件） | `$HOME/oscheckperf/io_test` |
+
+### 文件类型说明
+
+| 文件类型 | 存放位置 | 说明 |
+|----------|----------|------|
+| **原始测试数据** | `./output/original_data_*` | 所有测试的原始输出汇总 |
+| **解析结果** | `./output/data_*` | 解析后的结构化测试结果 |
+| **最终报告** | `./output/report_benchmark_*` | 格式化的性能报告 |
+| **sysbench 输出** | `$HOME/oscheckperf/tmp/vb_fileio_*.txt` | sysbench 文本输出（临时） |
+| **fio 配置** | `$HOME/oscheckperf/tmp/fio_*.fio` | fio 配置文件（临时） |
+| **fio JSON** | `$HOME/oscheckperf/tmp/fio_*_result_*.json` | fio JSON 结果（临时） |
+| **网络 JSON** | `$HOME/oscheckperf/tmp/network_*.json` | 网络测试结果（临时） |
+| **IO测试文件** | `$HOME/oscheckperf/io_test/` | sysbench/fio 创建的测试文件 |
+
+### 路径配置
+
+可以通过环境变量 `BASE_DIR` 统一修改基础目录：
+
+```bash
+# 修改所有路径的基础目录
+export BASE_DIR=/custom/path/to/oscheckperf
+./oscheckperf
+```
+
+**环境变量优先级**：
+- `BASE_DIR` > 默认值 `$HOME/oscheckperf`
+- `IO_PATH` > 默认值 `$BASE_DIR/io_test`  
+- `OUTPUT_DIR` > 默认值 `./output`
 
 ## 快速开始
 
@@ -259,20 +306,45 @@ FIO 测试采用不同的工作方式：
 
 **常用参数**：
 
+### sysbench 参数
+
+| 参数 | 默认值 | 说明 |
+|------|--------|------|
+| `SYSBENCH_PROFILES` | `rndrw` | sysbench 测试模式，空格分隔（seqwr/seqrewr/seqrd/rndrd/rndwr/rndrw） |
+| `SYSBENCH_FILE_NUM` | `4` | sysbench 测试文件数量 |
+| `SYSBENCH_BLOCK_SIZE` | `16K` | sysbench 块大小 |
+| `SYSBENCH_IO_MODE` | `sync` | sysbench IO 模式（sync/async） |
+| `SYSBENCH_EXTRA_FLAGS` | `direct` | sysbench 额外标志（direct/sync） |
+| `SYSBENCH_THREADS` | `4` | sysbench 线程数 |
+| `SYSBENCH_DURATION` | `DURATION` | sysbench IO 测试时长 |
+
+### fio 参数
+
+| 参数 | 默认值 | 说明 |
+|------|--------|------|
+| `FIO_PROFILES` | `randrw` | fio 测试模式，空格分隔（read/write/randread/randwrite/rw/randrw/trim/randtrim/trimwrite） |
+| `FIO_BS` | `16K` | fio 块大小（优化后更适合数据库场景） |
+| `FIO_IODEPTH` | `32` | fio I/O 深度 |
+| `FIO_NUMJOBS` | `4` | fio 工作线程数 |
+| `FIO_DIRECT` | `1` | fio 直接 I/O 模式 |
+| `FIO_FILE_NUM` | `4` | fio 测试文件数量（模拟多数据文件场景） |
+| `FIO_IOENGINE` | `libaio` | fio IO 引擎（libaio/sync/posixaio） |
+| `FIO_DURATION` | `DURATION` | fio 测试时长 |
+
+### 通用参数
+
 | 参数 | 默认值 | 说明 |
 |------|--------|------|
 | `IO_PATH` | `$HOME/oscheckperf/io_test` | 测试文件目录（替代IO_TEST_PATH） |
 | `IO_TOTAL_SIZE` | `1G` | 测试文件总大小（sysbench 和 fio 通用） |
-| `SYSBENCH_PROFILES` | `rndrw` | sysbench 测试模式，空格分隔（seqwr/seqrewr/seqrd/rndrd/rndwr/rndrw） |
-| `SYSBENCH_FILE_NUM` | `1` | sysbench 测试文件数量 |
 | `IO_TOOL` | `sysbench` | IO 测试工具（sysbench/fio） |
-| `SYSBENCH_DURATION` | `DURATION` | sysbench IO 测试时长 |
-| `FIO_DURATION` | `DURATION` | fio 测试时长 |
-| `FIO_PROFILES` | `randrw` | fio 测试模式，空格分隔（read/write/randread/randwrite/rw/randrw/trim/randtrim/trimwrite） |
-| `FIO_BS` | `8K` | fio 块大小 |
-| `FIO_IODEPTH` | `64` | fio I/O 深度 |
-| `FIO_NUMJOBS` | `4` | fio 工作线程数 |
-| `FIO_DIRECT` | `1` | fio 直接 I/O 模式 |
+
+### 参数说明
+
+**FIO_FILE_NUM 说明**：
+- 设置测试文件数量，默认为 4
+- 当配置 `FIO_FILE_NUM` 时，每个文件大小 = `IO_TOTAL_SIZE / FIO_FILE_NUM`
+- 例如：`IO_TOTAL_SIZE=1G`，`FIO_FILE_NUM=4` → 每个文件 256M
 
 **示例**：
 
@@ -324,7 +396,7 @@ FIO 测试采用不同的工作方式：
 
 ### Q2: 测试会删除数据吗？
 
-**A**: 测试文件仅写入指定目录（默认 `/tmp`），测试完成后可自动清理
+**A**: 测试文件仅写入指定目录（默认 `$HOME/oscheckperf/io_test`），测试完成后可自动清理
 
 ### Q3: 如何自定义 IO 测试路径？
 
@@ -372,17 +444,3 @@ FIO 测试采用不同的工作方式：
 
 本项目采用 GNU General Public License v3.0 许可证。
 
-## 版本历史
-
-| 标签    | 日期         | 变更                                                 |
-| ----- | ---------- | -------------------------------------------------- |
-| 0.5.0 | 2026-04-21 | 修复远程执行路径问题，添加 SSH 免密登录检查，改进 IO 测试路径管理，支持任意服务器列表文件分发，添加 check 命令支持，优化检查输出详细信息，支持多子命令同时执行，分离检查和压测逻辑，添加 DEBUG 模式 |
-| 0.4.0 | 2026-04-21 | 重构命令行参数，添加子命令支持（cpu/mem/io/network/thread/mutex/all），优化帮助信息显示，分类展示测试参数 |
-| 0.3.0 | 2026-04-20 | 支持通过 -f 服务器IP列表控制本地机器是否参与压测，若本机器不在IP列表中则不参与压测；支持编译和scp到目标集群服务器列表 |
-| 0.2.0 | 2026-04-17 | 重构移除 lib 目录，将所有函数合并到主脚本，添加命令行参数支持及覆盖功能，更新文档为中英文双版本 |
-| 0.1.0 | 2026-04-16 | 初始版本，包含基本基准测试功能                                    |
-
-***
-
-**创建日期**: 2026-04-17
-**维护团队**: Vastbase 二线团队

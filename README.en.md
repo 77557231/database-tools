@@ -14,14 +14,61 @@ A system-level performance benchmarking tool designed for Vastbase, openGauss, a
 ## Project Structure
 
 ```
-oscheckperf/
+$HOME/oscheckperf/
 ├── oscheckperf              # Main entry script
-├── output/                   # Test results output directory
+├── output/                   # Test results output directory (in current directory)
+│   ├── original_data_*_all_results.log  # Raw test data summary
+│   ├── data_*_all_results.log           # Parsed test results
+│   └── report_benchmark_*.log           # Final performance report
+├── tmp/                      # Temporary files directory
+│   ├── vb_fileio_*.txt       # sysbench fileio test output
+│   ├── fio_*.fio             # fio configuration files
+│   ├── fio_*_result_*.json   # fio JSON test results
+│   └── network_*.json        # Network test JSON results
+├── io_test/                  # IO test data directory
+│   ├── test_file.*           # Test files created by sysbench (auto cleaned)
+│   └── fio_test_file.*       # Test files created by fio (retained)
 ├── tools/
 │   └── skill.md              # Development documentation
 ├── README.md                 # Documentation (Chinese)
 └── README.en.md              # Documentation (English)
 ```
+
+### Directory Structure Description
+
+| Directory | Purpose | Default Path |
+|-----------|---------|--------------|
+| `output/` | Final reports and logs (original_data*, data*, report_benchmark*) | `./output` (current directory) |
+| `tmp/` | Temporary files (network test results, fio JSON, sysbench output) | `$HOME/oscheckperf/tmp` |
+| `io_test/` | IO test data files (test files created by sysbench/fio) | `$HOME/oscheckperf/io_test` |
+
+### File Type Description
+
+| File Type | Location | Description |
+|-----------|----------|-------------|
+| **Raw test data** | `./output/original_data_*` | Summary of all raw test outputs |
+| **Parsed results** | `./output/data_*` | Parsed structured test results |
+| **Final report** | `./output/report_benchmark_*` | Formatted performance report |
+| **sysbench output** | `$HOME/oscheckperf/tmp/vb_fileio_*.txt` | sysbench text output (temporary) |
+| **fio config** | `$HOME/oscheckperf/tmp/fio_*.fio` | fio configuration files (temporary) |
+| **fio JSON** | `$HOME/oscheckperf/tmp/fio_*_result_*.json` | fio JSON results (temporary) |
+| **Network JSON** | `$HOME/oscheckperf/tmp/network_*.json` | Network test results (temporary) |
+| **IO test files** | `$HOME/oscheckperf/io_test/` | Test files created by sysbench/fio |
+
+### Path Configuration
+
+You can modify the base directory using the `BASE_DIR` environment variable:
+
+```bash
+# Modify the base directory for all paths
+export BASE_DIR=/custom/path/to/oscheckperf
+./oscheckperf
+```
+
+**Environment Variable Priority**:
+- `BASE_DIR` > Default `$HOME/oscheckperf`
+- `IO_PATH` > Default `$BASE_DIR/io_test`  
+- `OUTPUT_DIR` > Default `./output`
 
 ## Quick Start
 
@@ -233,15 +280,45 @@ FIO testing works differently:
 
 **Common Parameters**:
 
+### sysbench Parameters
+
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `IO_TEST_PATH` | `$HOME/oscheckperf/io_test` | Test file directory |
+| `SYSBENCH_PROFILES` | `rndrw` | sysbench test modes, space-separated (seqwr/seqrewr/seqrd/rndrd/rndwr/rndrw) |
+| `SYSBENCH_FILE_NUM` | `4` | Number of sysbench test files |
+| `SYSBENCH_BLOCK_SIZE` | `16K` | sysbench block size |
+| `SYSBENCH_IO_MODE` | `sync` | sysbench IO mode (sync/async) |
+| `SYSBENCH_EXTRA_FLAGS` | `direct` | sysbench extra flags (direct/sync) |
+| `SYSBENCH_THREADS` | `4` | sysbench threads count |
+| `SYSBENCH_DURATION` | `DURATION` | sysbench IO test duration |
+
+### fio Parameters
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `FIO_PROFILES` | `randrw` | fio test modes, space-separated (read/write/randread/randwrite/rw/randrw/trim/randtrim/trimwrite) |
+| `FIO_BS` | `16K` | fio block size (optimized for database workloads) |
+| `FIO_IODEPTH` | `32` | fio I/O depth |
+| `FIO_NUMJOBS` | `4` | fio job threads count |
+| `FIO_DIRECT` | `1` | fio direct I/O mode |
+| `FIO_FILE_NUM` | `4` | Number of fio test files (simulates multi-datafile scenario) |
+| `FIO_IOENGINE` | `libaio` | fio IO engine (libaio/sync/posixaio) |
+| `FIO_DURATION` | `DURATION` | fio test duration |
+
+### General Parameters
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `IO_PATH` | `$HOME/oscheckperf/io_test` | Test file directory |
 | `IO_TOTAL_SIZE` | `1G` | Total test file size (shared by sysbench and fio) |
-| `IO_TEST_MODE` | `rndrw` | Test mode (seqwr/seqrd/rndwr/rndrd/rndrw) |
-| `IO_FILE_NUM` | `1` | Number of test files |
 | `IO_TOOL` | `sysbench` | IO testing tool (sysbench/fio) |
-| `IO_DURATION` | `DURATION` | Sysbench IO test duration |
-| `FIO_DURATION` | `300` | FIO test duration |
+
+### Parameter Notes
+
+**FIO_FILE_NUM Note**:
+- Sets the number of test files, default is 4
+- When `FIO_FILE_NUM` is configured, each file size = `IO_TOTAL_SIZE / FIO_FILE_NUM`
+- Example: `IO_TOTAL_SIZE=1G`, `FIO_FILE_NUM=4` → 256M per file
 
 **Examples**:
 
@@ -250,10 +327,10 @@ FIO testing works differently:
 ./oscheckperf io DURATION=60 IO_TOTAL_SIZE=2G
 
 # Sequential read test with fio
-./oscheckperf io IO_TOOL=fio IO_TEST_MODE=read FIO_DURATION=60
+./oscheckperf io IO_TOOL=fio FIO_PROFILES=read FIO_DURATION=60
 
 # Specify test path to database data directory
-./oscheckperf io IO_TEST_PATH=/data/vastbase/pg_xlog
+./oscheckperf io IO_PATH=/data/vastbase/pg_xlog
 ```
 
 ### Network Test
@@ -334,17 +411,3 @@ FIO testing works differently:
 
 This project is licensed under the GNU General Public License v3.0.
 
-## Version History
-
-| Tag | Date | Changes |
-|-----|------|---------|
-| 0.5.0 | 2026-04-21 | Fixed remote execution path issue, added SSH passwordless login check, improved IO test path management, supported distribution to arbitrary server list files, added check command support, optimized check output with detailed information, supported multiple subcommands execution, separated check and test logic, added DEBUG mode |
-| 0.4.0 | 2026-04-21 | Refactored command line parameters, added subcommand support (cpu/mem/io/network/thread/mutex/all), optimized help information display, categorized test parameters |
-| 0.3.0 | 2026-04-20 | Added support for controlling whether local machine participates in testing through -f server IP list, local machine will not participate if not in IP list; Added support for compiling and distributing sysbench to target cluster server list |
-| 0.2.0 | 2026-04-17 | Refactored to remove lib directory, merged all functions into main script, added command line parameter support with override capability, updated documentation to English |
-| 0.1.0 | 2026-04-16 | Initial release with basic benchmarking functionality |
-
----
-
-**Created**: 2026-04-17
-**Maintained by**: Vastbase L2 Support Team

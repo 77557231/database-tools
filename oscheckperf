@@ -1,7 +1,7 @@
 #!/bin/bash
 #--------------------------------------------------------------------------------
 #-- File name:   oscheckperf
-#-- Version:     v0.6.3
+#-- Version:     v0.6.4
 #-- Purpose:     Database System Benchmark Tool
 #-- Author:      Vastbase Performance Team
 #-- Description: One-click system benchmarking tool, supports configuration via config file or command line parameters
@@ -12,9 +12,27 @@
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+# ================================================================================
+# Path Constants - Centralized path management
+# All paths are derived from BASE_DIR for easy modification
+# ================================================================================
+# Base directory for all oscheckperf data - can be modified here for all paths
+export BASE_DIR="${BASE_DIR:-$HOME/oscheckperf}"
+
+# Temporary files directory (logs, intermediate data, network test results)
+export TMP_DIR="$BASE_DIR/tmp"
+
+# IO test data directory (sysbench/fio test files)
+export IO_PATH_DEFAULT="$BASE_DIR/io_test"
+
+# Output directory for final reports and logs (original_data*, data*, report_benchmark*)
+export OUTPUT_DIR_DEFAULT="./output"
+
+# ================================================================================
+
 # Default parameters
 CONFIG_FILE=""
-OUTPUT_DIR="./output"
+OUTPUT_DIR="$OUTPUT_DIR_DEFAULT"
 DRY_RUN=false
 NO_CHECKS=false
 
@@ -70,7 +88,7 @@ parse_args() {
                 exit 0
                 ;;
             --version)
-                echo "Version: 0.6.3"
+                echo "Version: 0.6.4"
                 exit 0
                 ;;
             --dry-run)
@@ -215,20 +233,19 @@ show_help() {
     echo "  check         Run only system checks (dependencies, permissions, disk space, network)"
     echo ""
     echo "Options:"
-    echo "  -o <output_dir>   Specify output directory path (default: ./output)"
+    echo "  -o <output_dir>   Specify output directory path (default: $OUTPUT_DIR_DEFAULT)"
     echo "  -f <servers_file> Specify servers list file path (one IP per line)"
     echo "  -i                Install and distribute sysbench to target servers"
     echo "  -h                Show this help message"
     echo "  --debug           Enable debug mode (show detailed logs)"
     echo "  --version         Show version information"
-    echo "  --remote          Remote mode (execute on remote servers)"
     echo "  --dry-run         Dry run mode (show commands without execution)"
     echo "  --parallel        Execute tests on multiple servers in parallel (default)"
     echo "  --serial          Execute tests on multiple servers sequentially"
     echo ""
-    echo "Common parameters (KEY=VALUE format):"
+    echo "  Common parameters (KEY=VALUE format):"
     echo "  DURATION=<seconds>          Unified test duration (default: 60)"
-    echo "  OUTPUT_DIR=<path>           Output directory (default: ./output)"
+    echo "  OUTPUT_DIR=<path>           Output directory (default: $OUTPUT_DIR_DEFAULT)"
     echo "  CLEANUP=true|false          Cleanup temp files after test (default: true)"
     echo ""
     echo "CPU test parameters:"
@@ -245,22 +262,28 @@ show_help() {
     echo "  Common IO parameters:"
     echo "    IO_TOOL=sysbench|fio        IO test tool (default: sysbench)"
     echo "    IO_TOTAL_SIZE=<size>        Total file size for IO test (default: 1G)"
-    echo "    IO_PATH=<path>              IO test directory path (default: \$HOME/oscheckperf/io_test)"
+    echo "    IO_PATH=<path>              IO test directory path (default: $IO_PATH_DEFAULT)"
     echo ""
     echo "  sysbench-specific parameters:"
     echo "    SYSBENCH_PROFILES=<profiles>     sysbench IO profiles, space-separated (default: rndrw)"
     echo "                                     Available modes: seqwr, seqrewr, seqrd, rndrd, rndwr, rndrw"
-    echo "    SYSBENCH_FILE_NUM=<number>       Number of test files (default: 1)"
+    echo "    SYSBENCH_FILE_NUM=<number>       Number of test files (default: 4)"
+    echo "    SYSBENCH_BLOCK_SIZE=<size>       Block size (default: 16K)"
+    echo "    SYSBENCH_IO_MODE=<mode>          IO mode: sync, async (default: sync)"
+    echo "    SYSBENCH_EXTRA_FLAGS=<flags>     Extra flags: direct, sync (default: direct)"
+    echo "    SYSBENCH_THREADS=<number>        Number of threads (default: 4)"
     echo "    SYSBENCH_DURATION=<seconds>      sysbench IO test duration (default: same as DURATION)"
     echo ""
     echo "  fio-specific parameters:"
     echo "    FIO_DURATION=<seconds>      fio test duration (default: same as DURATION)"
     echo "    FIO_PROFILES=<profiles>     fio test profiles, space-separated (default: randrw)"
     echo "                                Available modes: read, write, randread, randwrite, rw, randrw, trim, randtrim, trimwrite"
-    echo "    FIO_BS=<size>              Block size for all profiles (default: 8K)"
-    echo "    FIO_IODEPTH=<num>           I/O depth for all profiles (default: 64)"
+    echo "    FIO_BS=<size>              Block size for all profiles (default: 16K)"
+    echo "    FIO_IODEPTH=<num>           I/O depth for all profiles (default: 32)"
     echo "    FIO_NUMJOBS=<num>           Number of jobs for all profiles (default: 4)"
     echo "    FIO_DIRECT=0|1              Direct I/O mode (default: 1, bypass OS cache)"
+    echo "    FIO_FILE_NUM=<num>          Number of test files (default: 4, simulates multi-datafile scenario)"
+    echo "    FIO_IOENGINE=<engine>       I/O engine: libaio, sync, posixaio (default: libaio)"
     echo ""
     echo "Network test parameters:"
     echo "  NETWORK_MODE=serial|parallel|matrix  Network test mode (default: serial)"
@@ -292,6 +315,19 @@ show_help() {
     echo "  $0 mem DURATION=20"
     echo "  $0 io IO_TOOL=fio"
     echo "  $0 network -f servers.txt NETWORK_MODE=matrix"
+    echo ""
+    echo "Directory Structure:"
+    echo "  \$HOME/oscheckperf/"
+    echo "    ├── oscheckperf       # Main entry script"
+    echo "    ├── tmp/              # Temporary files (network test results, intermediate data)"
+    echo "    ├── io_test/          # IO test data files (sysbench/fio)"
+    echo "    └── output/           # Final reports and logs (original_data*, data*, report_benchmark*)"
+    echo ""
+    echo "Path Configuration (modify via BASE_DIR environment variable):"
+    echo "  BASE_DIR                Base directory (default: $HOME/oscheckperf)"
+    echo "  TMP_DIR                 Temp directory (default: \$BASE_DIR/tmp)"
+    echo "  IO_PATH                 IO test directory (default: \$BASE_DIR/io_test)"
+    echo "  OUTPUT_DIR              Output directory (default: ./output)"
     echo ""
 }
 
@@ -328,7 +364,7 @@ get_memory_size_mb() {
 
 # Get disk available space (KB)
 get_disk_available_kb() {
-    local path="${1:-/tmp}"
+    local path="${1:-$BASE_DIR}"
     df -P "$path" | awk 'NR==2 {print $4}'
 }
 
@@ -452,6 +488,23 @@ check_all() {
     echo "Checking system prerequisites..."
     echo "--------------------------------"
     
+    # Validate parameters first - as the first check item
+    echo "  Checking parameters..."
+    # Use temporary file to capture output and exit code
+    local temp_output=$(mktemp)
+    validate_all_parameters true >"$temp_output" 2>&1
+    local validation_exit_code=$?
+    # Indent the output
+    sed 's/^/  /' "$temp_output"
+    rm -f "$temp_output"
+    if [ $validation_exit_code -eq 0 ]; then
+        echo "  ✓ Parameters check passed"
+    else
+        echo "  ✗ Parameters check failed"
+        exit 1
+    fi
+    echo ""
+    
     # Check dependencies
     check_dependencies
     
@@ -519,7 +572,7 @@ check_permissions() {
     
     # Check test directory write permission
     # Support new IO_PATH parameter with backward compatibility to IO_TEST_PATH
-    local test_path="${IO_PATH:-${IO_TEST_PATH:-/tmp}}"
+    local test_path="${IO_PATH:-${IO_TEST_PATH:-$IO_PATH_DEFAULT}}"
     if [ -w "$test_path" ]; then
         echo "  ✓ Test directory write permission: $test_path"
     else
@@ -541,7 +594,7 @@ check_disk_space() {
     echo "  Checking disk space..."
 
     # Support new IO_PATH parameter with backward compatibility to IO_TEST_PATH
-    local test_path="${IO_PATH:-${IO_TEST_PATH:-/tmp}}"
+    local test_path="${IO_PATH:-${IO_TEST_PATH:-$IO_PATH_DEFAULT}}"
     local available_kb=$(get_disk_available_kb "$test_path")
     local available_gb=$((available_kb / 1024 / 1024))
     
@@ -633,9 +686,11 @@ cleanup_residual_processes() {
     # iperf3: server mode with specific port
     # fio: running fio tests (not just any fio process)
     # sysbench: running sysbench tests (not just any sysbench process)
+    # oscheckperf: main benchmark script (for cleanup after Ctrl+C)
     local iperf3_pattern="iperf3 -s -p $port"
     local fio_pattern="fio.*--name="
     local sysbench_pattern="sysbench.*--test="
+    local oscheckperf_pattern="oscheckperf"
     
     # Function to cleanup processes on a specific host
     cleanup_host_processes() {
@@ -674,6 +729,16 @@ cleanup_residual_processes() {
             local pid_count=$(echo "$sysbench_pids" | wc -l)
             cleanup_details="${cleanup_details}    - sysbench test: $pid_count process(es)\n"
             $cmd_prefix sh -c "echo '$sysbench_pids' | xargs kill -9 2>/dev/null || true" 2>/dev/null
+            host_cleaned=$((host_cleaned + pid_count))
+        fi
+        
+        # Check and cleanup oscheckperf processes (cleanup after Ctrl+C)
+        # Exclude the current running process
+        local oscheckperf_pids=$($cmd_prefix pgrep -f "$oscheckperf_pattern" 2>/dev/null | grep -v $$ || true)
+        if [ -n "$oscheckperf_pids" ]; then
+            local pid_count=$(echo "$oscheckperf_pids" | wc -l)
+            cleanup_details="${cleanup_details}    - oscheckperf: $pid_count process(es)\n"
+            $cmd_prefix sh -c "echo '$oscheckperf_pids' | xargs kill -9 2>/dev/null || true" 2>/dev/null
             host_cleaned=$((host_cleaned + pid_count))
         fi
         
@@ -893,7 +958,8 @@ run_sysbench_fileio() {
         sysbench fileio \
             --file-total-size="${IO_TOTAL_SIZE:-1G}" \
             --file-test-mode="$test_mode" \
-            --file-num="${SYSBENCH_FILE_NUM:-1}" \
+            --file-num="${SYSBENCH_FILE_NUM:-4}" \
+            --file-block-size="${SYSBENCH_BLOCK_SIZE:-16K}" \
             prepare > "/dev/null" 2>&1
         local prepare_exit=$?
         if [ "$prepare_exit" -ne 0 ]; then
@@ -906,7 +972,11 @@ run_sysbench_fileio() {
             --file-total-size="${IO_TOTAL_SIZE:-1G}" \
             --file-test-mode="$test_mode" \
             --time="${SYSBENCH_DURATION:-${DURATION:-60}}" \
-            --file-num="${SYSBENCH_FILE_NUM:-1}" \
+            --file-num="${SYSBENCH_FILE_NUM:-4}" \
+            --file-block-size="${SYSBENCH_BLOCK_SIZE:-16K}" \
+            --file-io-mode="${SYSBENCH_IO_MODE:-sync}" \
+            --file-extra-flags="${SYSBENCH_EXTRA_FLAGS:-direct}" \
+            --threads="${SYSBENCH_THREADS:-4}" \
             run > "$temp_output_file" 2>&1
         local run_exit=$?
         if [ "$run_exit" -ne 0 ]; then
@@ -919,7 +989,8 @@ run_sysbench_fileio() {
         sysbench fileio \
             --file-total-size="${IO_TOTAL_SIZE:-1G}" \
             --file-test-mode="$test_mode" \
-            --file-num="${SYSBENCH_FILE_NUM:-1}" \
+            --file-num="${SYSBENCH_FILE_NUM:-4}" \
+            --file-block-size="${SYSBENCH_BLOCK_SIZE:-16K}" \
             cleanup > "/dev/null" 2>&1
 
         # Parse result and display detailed output
@@ -963,26 +1034,45 @@ run_fio_test() {
         # Generate fio configuration
         local fio_conf="$TMP_DIR/fio_${profile}.fio"
         local rw_type="${profile}"
-        local bs="${FIO_BS:-8K}"
-        local iodepth="${FIO_IODEPTH:-64}"
+        local bs="${FIO_BS:-16K}"
+        local iodepth="${FIO_IODEPTH:-32}"
         local numjobs="${FIO_NUMJOBS:-4}"
         local direct="${FIO_DIRECT:-1}"
+        local ioengine="${FIO_IOENGINE:-libaio}"
+        local file_num="${FIO_FILE_NUM:-4}"
+        local total_size="${IO_TOTAL_SIZE:-1G}"
+        
+        # Calculate file size per file: total_size / file_num
+        # e.g., IO_TOTAL_SIZE=1G, FIO_FILE_NUM=4 → each file is 256M
+        local per_file_size="auto"
+        local size_unit="G"
+        local size_value=$(echo "$total_size" | sed -E 's/([0-9]+)([GMK])/\1/')
+        local size_org_unit=$(echo "$total_size" | sed -E 's/([0-9]+)([GMK])/\2/')
+        
+        if [ "$file_num" -gt 0 ] && [ "$size_value" -gt 0 ]; then
+            local per_size=$((size_value * 1024 / file_num))
+            per_file_size="${per_size}M"
+        else
+            per_file_size="${total_size}"
+        fi
         
         cat > "$fio_conf" << EOF
 [global]
-ioengine=libaio
+ioengine=${ioengine}
 direct=${direct}
-size=${IO_TOTAL_SIZE:-1G}
+size=${per_file_size}
 runtime=${FIO_DURATION:-${DURATION:-60}}
 time_based
 group_reporting
+thread
 
 [${profile}]
 rw=${rw_type}
 bs=${bs}
 iodepth=${iodepth}
 numjobs=${numjobs}
-filename=${IO_PATH:-${IO_TEST_PATH:-$HOME/oscheckperf/io_test}}/fio_test_${profile}
+nrfiles=${file_num}
+filename=${IO_PATH:-${IO_TEST_PATH:-$HOME/oscheckperf/io_test}}/fio_test_${profile}_
 EOF
         
         # Show configuration file content (also shown in dry run mode)
@@ -1011,10 +1101,9 @@ EOF
         # Cleanup temporary files (also cleanup in dry run mode)
         rm -f "$fio_conf"
         
-        # Cleanup fio test file
+        # Cleanup fio test files (support multiple files)
         # Support new IO_PATH parameter with backward compatibility to IO_TEST_PATH
-        local fio_test_file="${IO_PATH:-${IO_TEST_PATH:-$HOME/oscheckperf/io_test}}/fio_test_${profile}"
-        rm -f "$fio_test_file"
+        rm -f "${IO_PATH:-${IO_TEST_PATH:-$HOME/oscheckperf/io_test}}/fio_test_${profile}_"* 2>/dev/null || true
         
         # Parse result
         if [ "$DRY_RUN" != true ] && [ -f "$json_output" ]; then
@@ -1334,8 +1423,8 @@ run_serial_network_test() {
     local duration="${DURATION:-60}"
     local parallel="${NETWORK_PARALLEL:-1}"
     
-    # Create output directory if it doesn't exist
-    local output_dir="./output"
+    # Create temp directory if it doesn't exist
+    local output_dir="$TMP_DIR"
     mkdir -p "$output_dir"
     
     # Auto-detect server IP if not set
@@ -1487,8 +1576,8 @@ run_serial_network_test() {
 run_multi_server_network_test() {
     echo "Starting multi-server network test..."
     
-    # Create output directory if it doesn't exist
-    local output_dir="./output"
+    # Create temp directory if it doesn't exist
+    local output_dir="$TMP_DIR"
     mkdir -p "$output_dir"
     
     # Parse server list
@@ -1616,8 +1705,8 @@ run_multi_server_network_test() {
         echo "  Running network test..."
         echo "  Command: iperf3 -c $server_ip -p $port -t $duration -J"
         
-        # Create output directory if it doesn't exist
-        local output_dir="./output"
+        # Create temp directory if it doesn't exist
+        local output_dir="$TMP_DIR"
         mkdir -p "$output_dir"
         
         # Update output file path
@@ -3558,6 +3647,12 @@ main() {
     # Parse command line arguments
     parse_args "$@"
     
+    # Validate all parameters first before doing anything else
+    # Skip validation here if it's a check command - validation will be done in check_all()
+    if [ "$CHECK_ENABLED" != "true" ]; then
+        validate_all_parameters
+    fi
+    
     # Debug output after parse_args
     if [ "$DEBUG" = "true" ]; then
         echo "DEBUG: After parse_args"
@@ -3570,7 +3665,7 @@ main() {
     fi
     
     # Set default values
-    OUTPUT_DIR="${OUTPUT_DIR:-./output}"
+    OUTPUT_DIR="${OUTPUT_DIR:-$OUTPUT_DIR_DEFAULT}"
     FORMAT="${FORMAT:-txt}"
     CLEANUP="${CLEANUP:-true}"
     
@@ -3580,19 +3675,15 @@ main() {
         *) OUTPUT_DIR="$(cd "$(dirname "$OUTPUT_DIR")" && pwd)/$(basename "$OUTPUT_DIR")" ;;
     esac
     
-    # Set TMP_DIR to $HOME/oscheckperf/tmp for consistent local and remote paths
-    TMP_DIR="$HOME/oscheckperf/tmp"
-    export TMP_DIR
-    
     # Set timestamp
     if [ -z "$TIMESTAMP" ]; then
         TIMESTAMP=$(date '+%Y%m%d_%H%M%S')
     fi
     
-    # Create output directory
+    # Create all necessary directories
     mkdir -p "$OUTPUT_DIR"
-    # Create temp directory
     mkdir -p "$TMP_DIR"
+    mkdir -p "$IO_PATH_DEFAULT"
     
     # Save subcommand enable flags
     local saved_cpu_enabled="$CPU_ENABLED"
@@ -4302,6 +4393,119 @@ install_and_distribute_sysbench() {
         else
             echo "  ✓ oscheckperf directory already exists: $sysbench_dir"
         fi
+    fi
+}
+
+# Validate all parameters before test execution
+validate_all_parameters() {
+    local no_exit="${1:-false}"
+    local error_count=0
+    local output=""
+    
+    # Validate SYSBENCH_PROFILES
+    if [ -n "$SYSBENCH_PROFILES" ]; then
+        local valid_sysbench_modes="seqwr seqrewr seqrd rndrd rndwr rndrw"
+        for mode in $SYSBENCH_PROFILES; do
+            if [[ ! " $valid_sysbench_modes " =~ " $mode " ]]; then
+                output="${output}ERROR: Invalid SYSBENCH_PROFILES mode: $mode\n"
+                output="${output}  Valid modes: $valid_sysbench_modes\n"
+                error_count=$((error_count + 1))
+            fi
+        done
+    fi
+
+    # Validate FIO_PROFILES
+    if [ -n "$FIO_PROFILES" ]; then
+        local valid_fio_modes="read write randread randwrite rw randrw trim randtrim trimwrite"
+        for mode in $FIO_PROFILES; do
+            if [[ ! " $valid_fio_modes " =~ " $mode " ]]; then
+                output="${output}ERROR: Invalid FIO_PROFILES mode: $mode\n"
+                output="${output}  Valid modes: $valid_fio_modes\n"
+                error_count=$((error_count + 1))
+            fi
+        done
+    fi
+
+    # Validate IO_TOOL
+    if [ -n "$IO_TOOL" ]; then
+        local valid_io_tools="sysbench fio"
+        if [[ ! " $valid_io_tools " =~ " $IO_TOOL " ]]; then
+            output="${output}ERROR: Invalid IO_TOOL: $IO_TOOL\n"
+            output="${output}  Valid values: $valid_io_tools\n"
+            error_count=$((error_count + 1))
+        fi
+    fi
+
+    # Validate FIO_DIRECT
+    if [ -n "$FIO_DIRECT" ]; then
+        local valid_fio_direct="0 1"
+        if [[ ! " $valid_fio_direct " =~ " $FIO_DIRECT " ]]; then
+            output="${output}ERROR: Invalid FIO_DIRECT: $FIO_DIRECT\n"
+            output="${output}  Valid values: $valid_fio_direct\n"
+            error_count=$((error_count + 1))
+        fi
+    fi
+
+    # Validate NETWORK_MODE
+    if [ -n "$NETWORK_MODE" ]; then
+        local valid_network_modes="serial parallel matrix"
+        if [[ ! " $valid_network_modes " =~ " $NETWORK_MODE " ]]; then
+            output="${output}ERROR: Invalid NETWORK_MODE: $NETWORK_MODE\n"
+            output="${output}  Valid values: $valid_network_modes\n"
+            error_count=$((error_count + 1))
+        fi
+    fi
+
+    # Validate MEMORY_OPER
+    if [ -n "$MEMORY_OPER" ]; then
+        local valid_memory_oper="read write"
+        if [[ ! " $valid_memory_oper " =~ " $MEMORY_OPER " ]]; then
+            output="${output}ERROR: Invalid MEMORY_OPER: $MEMORY_OPER\n"
+            output="${output}  Valid values: $valid_memory_oper\n"
+            error_count=$((error_count + 1))
+        fi
+    fi
+
+    # Validate BOOLEAN type parameters
+    for bool_param in "CLEANUP" "NO_CHECKS"; do
+        local param_val=$(eval echo \${$bool_param:-})
+        if [ -n "$param_val" ]; then
+            local valid_booleans="true false"
+            if [[ ! " $valid_booleans " =~ " $param_val " ]]; then
+                output="${output}ERROR: Invalid $bool_param: $param_val\n"
+                output="${output}  Valid values: $valid_booleans\n"
+                error_count=$((error_count + 1))
+            fi
+        fi
+    done
+
+    # Validate numeric parameters
+    for num_param in "DURATION" "CPU_THREADS" "CPU_MAX_PRIME" "MEMORY_THREADS" \
+        "SYSBENCH_FILE_NUM" "SYSBENCH_DURATION" "FIO_DURATION" "FIO_IODEPTH" \
+        "FIO_NUMJOBS" "THREADS_NUM" "THREADS_YIELDS" "THREADS_LOCKS" \
+        "MUTEX_THREADS" "MUTEX_NUM" "NETWORK_PARALLEL"; do
+        local param_val=$(eval echo \${$num_param:-})
+        if [ -n "$param_val" ]; then
+            if [[ ! "$param_val" =~ ^[0-9]+$ ]]; then
+                output="${output}ERROR: Invalid $num_param: $param_val\n"
+                output="${output}  Must be a positive integer\n"
+                error_count=$((error_count + 1))
+            fi
+        fi
+    done
+
+    # Output results
+    if [ "$error_count" -gt 0 ]; then
+        echo -e "$output\c"
+        echo "Total parameter validation errors: $error_count"
+        if [ "$no_exit" != "true" ]; then
+            exit 1
+        else
+            return 1
+        fi
+    else
+        echo "Parameter validation passed."
+        return 0
     fi
 }
 
