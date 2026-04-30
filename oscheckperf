@@ -1,7 +1,7 @@
 #!/bin/bash
 #--------------------------------------------------------------------------------
 #-- File name:   oscheckperf
-#-- Version:     v0.6.6
+#-- Version:     v0.6.7
 #-- Purpose:     Database System Benchmark Tool
 #-- Author:      Vastbase Performance Team
 #-- Description: One-click system benchmarking tool, supports configuration via config file or command line parameters
@@ -88,7 +88,7 @@ parse_args() {
                 exit 0
                 ;;
             --version)
-                echo "Version: 0.6.6"
+                echo "Version: 0.6.7"
                 exit 0
                 ;;
             --dry-run)
@@ -4116,8 +4116,8 @@ main() {
     fi
     
     # Run system checks before benchmark tests
-    if [ "$REMOTE" != "true" ] && [ "$CHECK_ENABLED" != "true" ]; then
-        # Run system checks
+    if [ "$REMOTE" != "true" ] && [ "$CHECK_ENABLED" != "true" ] && [ "$DRY_RUN" != "true" ]; then
+        # Run system checks (skip in dry-run mode)
         check_all
     fi
     
@@ -4143,8 +4143,11 @@ main() {
             echo "================================================================================"
             
             # Execute tests on the server
-            if [ "$target_ip" = "$local_ip" ]; then
-                # Local machine test
+            if [ "$target_ip" = "$local_ip" ] || [ "$DRY_RUN" = true ]; then
+                # Local machine test or dry-run mode (show commands for all servers)
+                if [ "$target_ip" != "$local_ip" ]; then
+                    echo "  [DRY RUN] Showing commands that would execute on remote server $target_ip:"
+                fi
                 if [ "$CPU_ENABLED" != "false" ]; then
                     run_cpu_test
                 fi
@@ -4169,7 +4172,7 @@ main() {
                     run_pgbench_test
                 fi
             else
-                # Remote server test
+                # Remote server test (actual execution)
                 echo "  Executing remote tests on $target_ip..."
                 
                 # Build the remote command with all enabled tests
@@ -4283,7 +4286,12 @@ main() {
                         fi
                         
                         # Add NO_CHECKS parameter to skip checks during benchmark
-                        local full_remote_command="cd ~/oscheckperf && TIMESTAMP=$TIMESTAMP ./oscheckperf $remote_command $remote_test_command NO_CHECKS=true REMOTE=true"
+                        # Pass --dry-run to remote so it also shows underlying commands
+                        local dry_run_flag=""
+                        if [ "$DRY_RUN" = true ]; then
+                            dry_run_flag="--dry-run"
+                        fi
+                        local full_remote_command="cd ~/oscheckperf && TIMESTAMP=$TIMESTAMP ./oscheckperf $dry_run_flag $remote_command $remote_test_command NO_CHECKS=true REMOTE=true"
                         if [ "$DRY_RUN" = true ]; then
                             echo "[DRY RUN] Would execute remote command on $target_ip:"
                             echo "  ssh $target_ip '$full_remote_command'"
