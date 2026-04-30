@@ -1,7 +1,7 @@
 #!/bin/bash
 #--------------------------------------------------------------------------------
 #-- File name:   oscheckperf
-#-- Version:     v0.6.4
+#-- Version:     v0.6.5
 #-- Purpose:     Database System Benchmark Tool
 #-- Author:      Vastbase Performance Team
 #-- Description: One-click system benchmarking tool, supports configuration via config file or command line parameters
@@ -88,7 +88,7 @@ parse_args() {
                 exit 0
                 ;;
             --version)
-                echo "Version: 0.6.4"
+                echo "Version: 0.6.5"
                 exit 0
                 ;;
             --dry-run)
@@ -197,14 +197,17 @@ parse_args() {
     fi
     
     # Debug output
-    if [ "$DEBUG" = "true" ]; then
-        echo "DEBUG: CPU_ENABLED: $CPU_ENABLED"
-        echo "DEBUG: MEMORY_ENABLED: $MEMORY_ENABLED"
-        echo "DEBUG: IO_ENABLED: $IO_ENABLED"
-        echo "DEBUG: NETWORK_ENABLED: $NETWORK_ENABLED"
-        echo "DEBUG: THREADS_ENABLED: $THREADS_ENABLED"
-        echo "DEBUG: MUTEX_ENABLED: $MUTEX_ENABLED"
-    fi
+    debug_log "parse_args completed" \
+        "CPU_ENABLED=$CPU_ENABLED" \
+        "MEMORY_ENABLED=$MEMORY_ENABLED" \
+        "IO_ENABLED=$IO_ENABLED" \
+        "NETWORK_ENABLED=$NETWORK_ENABLED" \
+        "THREADS_ENABLED=$THREADS_ENABLED" \
+        "MUTEX_ENABLED=$MUTEX_ENABLED" \
+        "SERVERS_FILE=$SERVERS_FILE" \
+        "OUTPUT_DIR=$OUTPUT_DIR" \
+        "DURATION=$DURATION" \
+        "IO_TOOL=$IO_TOOL"
     
     # Process remaining arguments as KEY=VALUE pairs
     for arg in "${remaining_args[@]}"; do
@@ -381,6 +384,111 @@ log_warn() {
     echo "[WARN] $(date '+%Y-%m-%d %H:%M:%S') - $1"
 }
 
+# Debug log function - only outputs when DEBUG is enabled
+# Usage: debug_log "message" [var1=value1] [var2=value2] ...
+debug_log() {
+    if [ "$DEBUG" != "true" ]; then
+        return
+    fi
+    
+    local message="$1"
+    shift
+    
+    echo "[DEBUG] $(date '+%Y-%m-%d %H:%M:%S') - $message"
+    
+    # Print additional variable values if provided
+    for arg in "$@"; do
+        echo "        $arg"
+    done
+}
+
+# ==============================================
+# Security validation functions (isolated module)
+# ==============================================
+
+# Validate path for security - check for dangerous characters
+# Returns 0 if valid, 1 if invalid
+# Prints error message with specific dangerous characters found
+validate_path() {
+    local path="$1"
+    local param_name="$2"
+    
+    # List of dangerous characters that can be used for command injection
+    local dangerous_chars=(";" "|" "&" "<" ">" "$" "\`" "\"" "'" "\\")
+    local found_dangerous=""
+    
+    for char in "${dangerous_chars[@]}"; do
+        if [[ "$path" == *"$char"* ]]; then
+            # Escape special characters for display
+            case "$char" in
+                ";") found_dangerous="$found_dangerous ;" ;;
+                "|") found_dangerous="$found_dangerous |" ;;
+                "&") found_dangerous="$found_dangerous &" ;;
+                "<") found_dangerous="$found_dangerous <" ;;
+                ">") found_dangerous="$found_dangerous >" ;;
+                "$") found_dangerous="$found_dangerous \$" ;;
+                "\`") found_dangerous="$found_dangerous \`" ;;
+                "\"") found_dangerous="$found_dangerous \"" ;;
+                "'") found_dangerous="$found_dangerous '" ;;
+                "\\") found_dangerous="$found_dangerous \\" ;;
+            esac
+        fi
+    done
+    
+    if [ -n "$found_dangerous" ]; then
+        echo "Error: Invalid $param_name path contains dangerous characters:$found_dangerous"
+        echo "       Path: $path"
+        return 1
+    fi
+    
+    # Additional check: path traversal attack
+    if [[ "$path" == *"../"* ]]; then
+        echo "Error: Invalid $param_name path contains directory traversal (../)"
+        echo "       Path: $path"
+        return 1
+    fi
+    
+    return 0
+}
+
+# Validate all path parameters
+validate_all_paths() {
+    local error_count=0
+    
+    # Validate IO_PATH
+    if [ -n "${IO_PATH:-}" ]; then
+        if ! validate_path "$IO_PATH" "IO_PATH"; then
+            error_count=$((error_count + 1))
+        fi
+    fi
+    
+    # Validate OUTPUT_DIR
+    if [ -n "${OUTPUT_DIR:-}" ]; then
+        if ! validate_path "$OUTPUT_DIR" "OUTPUT_DIR"; then
+            error_count=$((error_count + 1))
+        fi
+    fi
+    
+    # Validate TMP_DIR
+    if [ -n "${TMP_DIR:-}" ]; then
+        if ! validate_path "$TMP_DIR" "TMP_DIR"; then
+            error_count=$((error_count + 1))
+        fi
+    fi
+    
+    # Validate IO_TEST_PATH (backward compatibility)
+    if [ -n "${IO_TEST_PATH:-}" ]; then
+        if ! validate_path "$IO_TEST_PATH" "IO_TEST_PATH"; then
+            error_count=$((error_count + 1))
+        fi
+    fi
+    
+    if [ "$error_count" -gt 0 ]; then
+        echo "Error: $error_count path validation error(s) found"
+        exit 1
+    fi
+}
+
 # Cleanup test file
 cleanup_file() {
     local file="$1"
@@ -518,10 +626,17 @@ check_all() {
     check_network
     
     # Check SSH passwordless login for remote servers
+    debug_log "Starting check_ssh"
     check_ssh
     
     # Cleanup residual processes on all servers (before test execution)
-    cleanup_residual_processes
+    # Skip cleanup if SKIP_CLEANUP is set to true
+    debug_log "Starting cleanup_residual_processes"
+    if [ "${SKIP_CLEANUP:-false}" != "true" ]; then
+        # Use timeout to prevent cleanup from hanging
+        timeout --signal=KILL 30 cleanup_residual_processes 2>/dev/null || true
+    fi
+    debug_log "cleanup_residual_processes completed"
     
     echo ""
     echo "Prerequisites check completed successfully!"
@@ -580,13 +695,34 @@ check_permissions() {
         exit 1
     fi
     
-    # Check if running as root
+    # Check if running as root (informational only, no warning)
     if [ "$(id -u)" -eq 0 ]; then
         echo "  ✓ Running as root"
     else
-        echo "  ⚠ Running as non-root user, some tests may fail"
-        echo "    Suggestion: Run with 'sudo oscheckperf ...'"
+        echo "  ✓ Running as non-root user"
     fi
+}
+
+# Convert size string (e.g., 1G, 10GB, 512M) to GB
+convert_to_gb() {
+    local size="$1"
+    local num=$(echo "$size" | sed 's/[^0-9.]//g')
+    local unit=$(echo "$size" | sed 's/[0-9.]//g' | tr '[:lower:]' '[:upper:]')
+    
+    case "$unit" in
+        "GB"|"G")
+            echo "$num"
+            ;;
+        "MB"|"M")
+            echo "scale=2; $num / 1024" | bc
+            ;;
+        "KB"|"K")
+            echo "scale=4; $num / 1024 / 1024" | bc
+            ;;
+        *)
+            echo "$num"
+            ;;
+    esac
 }
 
 # Check disk space
@@ -598,8 +734,10 @@ check_disk_space() {
     local available_kb=$(get_disk_available_kb "$test_path")
     local available_gb=$((available_kb / 1024 / 1024))
     
-    # Calculate required space based on mode
+    # Calculate required space based on mode and IO test configuration
     local required_gb=0
+    
+    # Base requirement based on mode
     case $MODE in
         quick)
             required_gb=2
@@ -614,6 +752,31 @@ check_disk_space() {
             required_gb=0
             ;;
     esac
+    
+    # Additional space for IO tests
+    if [ "$IO_ENABLED" = "true" ] && [ -n "${IO_TOTAL_SIZE:-}" ]; then
+        local io_size_gb=$(convert_to_gb "$IO_TOTAL_SIZE")
+        local server_count=1
+        
+        # Get number of servers (if using -f servers.txt)
+        if [ ${#target_servers[@]} -gt 0 ]; then
+            server_count=${#target_servers[@]}
+        fi
+        
+        # Calculate IO space requirement (each server needs IO_TOTAL_SIZE)
+        local io_required=$(echo "$io_size_gb * $server_count" | bc)
+        
+        # Convert to integer for comparison
+        local io_required_int=$(echo "$io_required" | cut -d. -f1)
+        if [ -z "$io_required_int" ] || [ "$io_required_int" = "0" ]; then
+            io_required_int=$(echo "$io_size_gb * $server_count" | bc | cut -d. -f1)
+        fi
+        
+        # Add IO requirement to base requirement
+        required_gb=$((required_gb + io_required_int))
+        
+        echo "  IO test space requirement: ${IO_TOTAL_SIZE} x ${server_count} server(s) = ${io_required}GB"
+    fi
     
     if [ "$available_gb" -lt "$required_gb" ]; then
         echo "Error: Insufficient disk space"
@@ -681,6 +844,7 @@ cleanup_residual_processes() {
     local port="${NETWORK_PORT:-25201}"
     local total_cleaned=0
     local server_count=0
+    local current_user=$(whoami)
     
     # Define process patterns to check (using exact patterns to avoid false positives)
     # iperf3: server mode with specific port
@@ -689,7 +853,7 @@ cleanup_residual_processes() {
     # oscheckperf: main benchmark script (for cleanup after Ctrl+C)
     local iperf3_pattern="iperf3 -s -p $port"
     local fio_pattern="fio.*--name="
-    local sysbench_pattern="sysbench.*--test="
+    local sysbench_pattern="sysbench.*fileio"
     local oscheckperf_pattern="oscheckperf"
     
     # Function to cleanup processes on a specific host
@@ -698,48 +862,67 @@ cleanup_residual_processes() {
         local is_remote="$2"
         local host_cleaned=0
         local cleanup_details=""
+        local current_user_local="$current_user"
         
         # Determine command prefix for remote execution
         local cmd_prefix=""
         if [ "$is_remote" = "true" ]; then
-            cmd_prefix="ssh -o ConnectTimeout=5 $host"
+            cmd_prefix="timeout --signal=KILL 10 ssh -o ConnectTimeout=5 -o ServerAliveInterval=2 $host"
+            # Get remote username from SSH config or use current user
+            current_user_local=$($cmd_prefix whoami 2>/dev/null || echo "$current_user")
         fi
         
-        # Check and cleanup iperf3 server processes
-        local iperf3_pids=$($cmd_prefix pgrep -f "$iperf3_pattern" 2>/dev/null || true)
+        # Helper function to get PIDs for current user only
+        get_user_pids() {
+            local pattern="$1"
+            if [ "$is_remote" = "true" ]; then
+                $cmd_prefix pgrep -u "$current_user_local" -f "$pattern" 2>/dev/null || true
+            else
+                pgrep -u "$current_user_local" -f "$pattern" 2>/dev/null || true
+            fi
+        }
+        
+        # Helper function to kill PIDs with timeout
+        kill_pids() {
+            local pids="$1"
+            local process_desc="$2"
+            local pid_count=$(echo "$pids" | wc -l)
+            cleanup_details="${cleanup_details}    - $process_desc: $pid_count process(es)\n"
+            if [ "$is_remote" = "true" ]; then
+                timeout --signal=KILL 5 $cmd_prefix sh -c "echo '$pids' | xargs kill -9 2>/dev/null || true" 2>/dev/null
+            else
+                timeout --signal=KILL 5 sh -c "echo '$pids' | xargs kill -9 2>/dev/null || true" 2>/dev/null
+            fi
+            host_cleaned=$((host_cleaned + pid_count))
+        }
+        
+        # Check and cleanup iperf3 server processes (current user only)
+        local iperf3_pids=$(get_user_pids "$iperf3_pattern")
+        iperf3_pids=$(echo "$iperf3_pids" | grep -E '^[0-9]+$' || true)
         if [ -n "$iperf3_pids" ]; then
-            local pid_count=$(echo "$iperf3_pids" | wc -l)
-            cleanup_details="${cleanup_details}    - iperf3 server: $pid_count process(es) on port $port\n"
-            $cmd_prefix sh -c "echo '$iperf3_pids' | xargs kill -9 2>/dev/null || true" 2>/dev/null
-            host_cleaned=$((host_cleaned + pid_count))
+            kill_pids "$iperf3_pids" "iperf3 server on port $port"
         fi
         
-        # Check and cleanup fio test processes (only active test processes)
-        local fio_pids=$($cmd_prefix pgrep -f "$fio_pattern" 2>/dev/null || true)
+        # Check and cleanup fio test processes (current user only)
+        local fio_pids=$(get_user_pids "$fio_pattern")
+        fio_pids=$(echo "$fio_pids" | grep -E '^[0-9]+$' || true)
         if [ -n "$fio_pids" ]; then
-            local pid_count=$(echo "$fio_pids" | wc -l)
-            cleanup_details="${cleanup_details}    - fio test: $pid_count process(es)\n"
-            $cmd_prefix sh -c "echo '$fio_pids' | xargs kill -9 2>/dev/null || true" 2>/dev/null
-            host_cleaned=$((host_cleaned + pid_count))
+            kill_pids "$fio_pids" "fio test"
         fi
         
-        # Check and cleanup sysbench test processes (only active test processes)
-        local sysbench_pids=$($cmd_prefix pgrep -f "$sysbench_pattern" 2>/dev/null || true)
+        # Check and cleanup sysbench test processes (current user only)
+        local sysbench_pids=$(get_user_pids "$sysbench_pattern")
+        sysbench_pids=$(echo "$sysbench_pids" | grep -E '^[0-9]+$' || true)
         if [ -n "$sysbench_pids" ]; then
-            local pid_count=$(echo "$sysbench_pids" | wc -l)
-            cleanup_details="${cleanup_details}    - sysbench test: $pid_count process(es)\n"
-            $cmd_prefix sh -c "echo '$sysbench_pids' | xargs kill -9 2>/dev/null || true" 2>/dev/null
-            host_cleaned=$((host_cleaned + pid_count))
+            kill_pids "$sysbench_pids" "sysbench test"
         fi
         
-        # Check and cleanup oscheckperf processes (cleanup after Ctrl+C)
+        # Check and cleanup oscheckperf processes (cleanup after Ctrl+C) - current user only
         # Exclude the current running process
-        local oscheckperf_pids=$($cmd_prefix pgrep -f "$oscheckperf_pattern" 2>/dev/null | grep -v $$ || true)
+        local oscheckperf_pids=$(get_user_pids "$oscheckperf_pattern")
+        oscheckperf_pids=$(echo "$oscheckperf_pids" | grep -v $$ | grep -E '^[0-9]+$' || true)
         if [ -n "$oscheckperf_pids" ]; then
-            local pid_count=$(echo "$oscheckperf_pids" | wc -l)
-            cleanup_details="${cleanup_details}    - oscheckperf: $pid_count process(es)\n"
-            $cmd_prefix sh -c "echo '$oscheckperf_pids' | xargs kill -9 2>/dev/null || true" 2>/dev/null
-            host_cleaned=$((host_cleaned + pid_count))
+            kill_pids "$oscheckperf_pids" "oscheckperf"
         fi
         
         # Print cleanup details if any processes were cleaned
@@ -947,20 +1130,41 @@ run_sysbench_fileio() {
         # Generate unique temp file for each test mode
         local temp_output_file="$TMP_DIR/vb_fileio_${test_mode}_${TIMESTAMP}.txt"
 
+        # Build full sysbench command
+        local sysbench_prepare_cmd="sysbench fileio \
+            --file-total-size=${IO_TOTAL_SIZE:-1G} \
+            --file-test-mode=$test_mode \
+            --file-num=${SYSBENCH_FILE_NUM:-4} \
+            --file-block-size=${SYSBENCH_BLOCK_SIZE:-16K} \
+            prepare"
+        
+        local sysbench_run_cmd="sysbench fileio \
+            --file-total-size=${IO_TOTAL_SIZE:-1G} \
+            --file-test-mode=$test_mode \
+            --time=${SYSBENCH_DURATION:-${DURATION:-60}} \
+            --file-num=${SYSBENCH_FILE_NUM:-4} \
+            --file-block-size=${SYSBENCH_BLOCK_SIZE:-16K} \
+            --file-io-mode=${SYSBENCH_IO_MODE:-sync} \
+            --file-extra-flags=${SYSBENCH_EXTRA_FLAGS:-direct} \
+            --threads=${SYSBENCH_THREADS:-4} \
+            run"
+        
+        local sysbench_cleanup_cmd="sysbench fileio \
+            --file-total-size=${IO_TOTAL_SIZE:-1G} \
+            --file-test-mode=$test_mode \
+            --file-num=${SYSBENCH_FILE_NUM:-4} \
+            --file-block-size=${SYSBENCH_BLOCK_SIZE:-16K} \
+            cleanup"
+
         if [ "$DRY_RUN" = true ]; then
-            echo "  [DRY RUN] Would execute sysbench fileio prepare for mode: $test_mode"
-            echo "  [DRY RUN] Would execute sysbench fileio run for mode: $test_mode"
-            echo "  [DRY RUN] Would execute sysbench fileio cleanup for mode: $test_mode"
+            echo "  [DRY RUN] Prepare: $sysbench_prepare_cmd"
+            echo "  [DRY RUN] Run: $sysbench_run_cmd"
+            echo "  [DRY RUN] Cleanup: $sysbench_cleanup_cmd"
             continue
         fi
 
         # Prepare test files first
-        sysbench fileio \
-            --file-total-size="${IO_TOTAL_SIZE:-1G}" \
-            --file-test-mode="$test_mode" \
-            --file-num="${SYSBENCH_FILE_NUM:-4}" \
-            --file-block-size="${SYSBENCH_BLOCK_SIZE:-16K}" \
-            prepare > "/dev/null" 2>&1
+        $sysbench_prepare_cmd > "/dev/null" 2>&1
         local prepare_exit=$?
         if [ "$prepare_exit" -ne 0 ]; then
             echo "❌ Prepare command failed for mode: $test_mode"
@@ -968,16 +1172,7 @@ run_sysbench_fileio() {
         fi
 
         # Run test
-        sysbench fileio \
-            --file-total-size="${IO_TOTAL_SIZE:-1G}" \
-            --file-test-mode="$test_mode" \
-            --time="${SYSBENCH_DURATION:-${DURATION:-60}}" \
-            --file-num="${SYSBENCH_FILE_NUM:-4}" \
-            --file-block-size="${SYSBENCH_BLOCK_SIZE:-16K}" \
-            --file-io-mode="${SYSBENCH_IO_MODE:-sync}" \
-            --file-extra-flags="${SYSBENCH_EXTRA_FLAGS:-direct}" \
-            --threads="${SYSBENCH_THREADS:-4}" \
-            run > "$temp_output_file" 2>&1
+        $sysbench_run_cmd > "$temp_output_file" 2>&1
         local run_exit=$?
         if [ "$run_exit" -ne 0 ]; then
             echo "❌ Run command failed for mode: $test_mode"
@@ -986,12 +1181,7 @@ run_sysbench_fileio() {
         fi
 
         # Cleanup test files
-        sysbench fileio \
-            --file-total-size="${IO_TOTAL_SIZE:-1G}" \
-            --file-test-mode="$test_mode" \
-            --file-num="${SYSBENCH_FILE_NUM:-4}" \
-            --file-block-size="${SYSBENCH_BLOCK_SIZE:-16K}" \
-            cleanup > "/dev/null" 2>&1
+        $sysbench_cleanup_cmd > "/dev/null" 2>&1
 
         # Parse result and display detailed output
         if [ -f "$temp_output_file" ]; then
@@ -3634,15 +3824,13 @@ main() {
     export EXECUTION_COMMAND="$full_command"
     
     # Debug output before parse_args
-    if [ "$DEBUG" = "true" ]; then
-        echo "DEBUG: Before parse_args"
-        echo "DEBUG: CPU_ENABLED: $CPU_ENABLED"
-        echo "DEBUG: MEMORY_ENABLED: $MEMORY_ENABLED"
-        echo "DEBUG: IO_ENABLED: $IO_ENABLED"
-        echo "DEBUG: NETWORK_ENABLED: $NETWORK_ENABLED"
-        echo "DEBUG: THREADS_ENABLED: $THREADS_ENABLED"
-        echo "DEBUG: MUTEX_ENABLED: $MUTEX_ENABLED"
-    fi
+    debug_log "Before parse_args" \
+        "CPU_ENABLED=$CPU_ENABLED" \
+        "MEMORY_ENABLED=$MEMORY_ENABLED" \
+        "IO_ENABLED=$IO_ENABLED" \
+        "NETWORK_ENABLED=$NETWORK_ENABLED" \
+        "THREADS_ENABLED=$THREADS_ENABLED" \
+        "MUTEX_ENABLED=$MUTEX_ENABLED"
     
     # Parse command line arguments
     parse_args "$@"
@@ -3654,15 +3842,13 @@ main() {
     fi
     
     # Debug output after parse_args
-    if [ "$DEBUG" = "true" ]; then
-        echo "DEBUG: After parse_args"
-        echo "DEBUG: CPU_ENABLED: $CPU_ENABLED"
-        echo "DEBUG: MEMORY_ENABLED: $MEMORY_ENABLED"
-        echo "DEBUG: IO_ENABLED: $IO_ENABLED"
-        echo "DEBUG: NETWORK_ENABLED: $NETWORK_ENABLED"
-        echo "DEBUG: THREADS_ENABLED: $THREADS_ENABLED"
-        echo "DEBUG: MUTEX_ENABLED: $MUTEX_ENABLED"
-    fi
+    debug_log "After parse_args" \
+        "CPU_ENABLED=$CPU_ENABLED" \
+        "MEMORY_ENABLED=$MEMORY_ENABLED" \
+        "IO_ENABLED=$IO_ENABLED" \
+        "NETWORK_ENABLED=$NETWORK_ENABLED" \
+        "THREADS_ENABLED=$THREADS_ENABLED" \
+        "MUTEX_ENABLED=$MUTEX_ENABLED"
     
     # Set default values
     OUTPUT_DIR="${OUTPUT_DIR:-$OUTPUT_DIR_DEFAULT}"
@@ -3695,15 +3881,13 @@ main() {
     local saved_pgbench_enabled="$PGBENCH_ENABLED"
     
     # Debug output after saving flags
-    if [ "$DEBUG" = "true" ]; then
-        echo "DEBUG: Saved flags"
-        echo "DEBUG: saved_cpu_enabled: $saved_cpu_enabled"
-        echo "DEBUG: saved_memory_enabled: $saved_memory_enabled"
-        echo "DEBUG: saved_io_enabled: $saved_io_enabled"
-        echo "DEBUG: saved_network_enabled: $saved_network_enabled"
-        echo "DEBUG: saved_threads_enabled: $saved_threads_enabled"
-        echo "DEBUG: saved_mutex_enabled: $saved_mutex_enabled"
-    fi
+    debug_log "Saved flags" \
+        "saved_cpu_enabled=$saved_cpu_enabled" \
+        "saved_memory_enabled=$saved_memory_enabled" \
+        "saved_io_enabled=$saved_io_enabled" \
+        "saved_network_enabled=$saved_network_enabled" \
+        "saved_threads_enabled=$saved_threads_enabled" \
+        "saved_mutex_enabled=$saved_mutex_enabled"
     
 
     
@@ -3718,6 +3902,9 @@ main() {
     
     # Process command line arguments again to ensure they override config file values
     parse_args "$@"
+    
+    # Validate path parameters for security
+    validate_all_paths
     
     # Process server list (supports file or direct IP list)
     target_servers=()

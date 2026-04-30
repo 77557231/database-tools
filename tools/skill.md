@@ -8,12 +8,15 @@ Vastbase 系统基准测试工具是一个为 Vastbase、openGauss 和 PostgreSQ
 
 ```
 oscheckperf/
-├── oscheckperf              # 主入口脚本
-├── output/                   # 测试结果输出目录
+├── oscheckperf                          # 主入口脚本
+├── output/                               # 测试结果输出目录
 ├── tools/
-│   └── skill.md              # 开发规范文档
-├── README.md                 # 中文文档（默认）
-└── README.en.md              # 英文文档
+│   ├── skill.md                         # 开发规范文档
+│   ├── oscheckperf_push_all.sh          # 代码提交脚本
+│   ├── oscheckperf_validate_logs.sh     # 日志分析脚本
+│   └── oscheckperf_test.sh              # 脚本测试脚本
+├── README.md                            # 中文文档（默认）
+└── README.en.md                         # 英文文档
 ```
 
 ## 3. 开发规范
@@ -125,6 +128,95 @@ oscheckperf/
 - **错误处理**：统一错误处理机制，提高脚本稳定性
 - **日志输出**：标准化日志格式，便于调试和问题定位
 - **测试场景**：模块化测试场景，便于扩展和复用
+
+### 3.10 工具脚本规范
+
+#### 3.10.1 代码提交脚本（oscheckperf_push_all.sh）
+
+**功能定位**：自动提交代码到远程仓库并生成标准化tag描述
+
+**使用方式**：
+```bash
+# 提交代码并生成tag描述
+./tools/oscheckperf_push_all.sh "功能描述"
+
+# 交互式提交（提示输入commit信息）
+./tools/oscheckperf_push_all.sh
+```
+
+**核心功能**：
+- 自动获取版本号（从oscheckperf脚本读取VERSION变量）
+- 支持远程仓库配置（origin、upstream、backup）
+- 自动生成符合规范的tag描述，包含：
+  - 版本号和简短描述
+  - 最近5个commit变更记录
+  - 验证结果字段
+- 自动推送代码和tag到所有配置的远程仓库
+
+**tag描述生成规则**：
+```
+vX.X.X - 功能描述
+变更记录:
+1. commit信息1
+2. commit信息2
+3. commit信息3
+4. commit信息4
+5. commit信息5
+
+验证结果: 待验证
+```
+
+#### 3.10.2 日志分析脚本（oscheckperf_validate_logs.sh）
+
+**功能定位**：分析测试日志判断oscheckperf是否有错误
+
+**使用方式**：
+```bash
+# 分析默认输出目录
+./tools/oscheckperf_validate_logs.sh
+
+# 指定输出目录
+./tools/oscheckperf_validate_logs.sh /path/to/output
+```
+
+**分析内容**：
+- **原始数据日志分析**：检查error、fail、fatal、timeout等错误关键字
+- **解析结果日志分析**：检查测试模块完整性和异常数值
+- **报告日志分析**：检查报告摘要完整性
+
+**输出格式**：
+- 颜色标识：绿色（通过）、黄色（警告）、红色（错误）
+- 汇总统计：错误数量、警告数量
+- 退出码：0表示通过，1表示有错误
+
+#### 3.10.3 脚本测试脚本（oscheckperf_test.sh）
+
+**功能定位**：自动化测试oscheckperf脚本各项功能
+
+**使用方式**：
+```bash
+# 执行所有测试
+./tools/oscheckperf_test.sh
+```
+
+**测试项**：
+| 测试项 | 描述 |
+|--------|------|
+| 语法检查 | 验证脚本语法正确性 |
+| 帮助信息 | 验证帮助输出正常 |
+| 系统检查 | 验证check子命令功能 |
+| CPU测试 | 验证CPU测试功能（短时间） |
+| 内存测试 | 验证内存测试功能（短时间） |
+| 线程测试 | 验证线程测试功能（短时间） |
+| 互斥锁测试 | 验证互斥锁测试功能（短时间） |
+| 参数覆盖 | 验证参数覆盖功能 |
+| 报告生成 | 验证报告生成功能 |
+| 子命令解析 | 验证所有子命令解析正常 |
+
+**输出格式**：
+- 每个测试项显示通过/失败/跳过状态
+- 汇总统计：通过数、失败数、跳过数
+- 退出码：0表示全部通过，1表示有失败
 
 ## 4. 最佳实践
 
