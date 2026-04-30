@@ -9,4 +9,5 @@ test*
 servers.txt
 tools/rules.md
 tools/skill.md
+*.log
 
