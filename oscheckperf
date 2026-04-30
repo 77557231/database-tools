@@ -1,7 +1,7 @@
 #!/bin/bash
 #--------------------------------------------------------------------------------
 #-- File name:   oscheckperf
-#-- Version:     v0.6.5
+#-- Version:     v0.6.6
 #-- Purpose:     Database System Benchmark Tool
 #-- Author:      Vastbase Performance Team
 #-- Description: One-click system benchmarking tool, supports configuration via config file or command line parameters
@@ -88,7 +88,7 @@ parse_args() {
                 exit 0
                 ;;
             --version)
-                echo "Version: 0.6.5"
+                echo "Version: 0.6.6"
                 exit 0
                 ;;
             --dry-run)
@@ -402,6 +402,73 @@ debug_log() {
     done
 }
 
+# Timer functions for performance tracking
+declare -A TIMER_START_TIMES
+declare -A TIMER_ACCUMULATED
+
+# Start timer for a named phase
+# Usage: start_timer "phase_name"
+start_timer() {
+    if [ "$DEBUG" != "true" ]; then
+        return
+    fi
+    local phase_name="$1"
+    TIMER_START_TIMES["$phase_name"]=$(date +%s%3N)
+    echo "[DEBUG] $(date '+%Y-%m-%d %H:%M:%S') - ⏱️ Starting phase: $phase_name"
+}
+
+# End timer for a named phase and print elapsed time
+# Usage: end_timer "phase_name"
+end_timer() {
+    if [ "$DEBUG" != "true" ]; then
+        return
+    fi
+    local phase_name="$1"
+    local start_time="${TIMER_START_TIMES[$phase_name]}"
+    
+    if [ -z "$start_time" ]; then
+        echo "[DEBUG] $(date '+%Y-%m-%d %H:%M:%S') - ⏱️ Timer not started for phase: $phase_name"
+        return
+    fi
+    
+    local end_time=$(date +%s%3N)
+    local elapsed_ms=$((end_time - start_time))
+    local elapsed_sec=$(awk "BEGIN {printf \"%.2f\", $elapsed_ms / 1000}")
+    
+    # Accumulate time
+    if [ -z "${TIMER_ACCUMULATED[$phase_name]}" ]; then
+        TIMER_ACCUMULATED["$phase_name"]=0
+    fi
+    TIMER_ACCUMULATED["$phase_name"]=$((TIMER_ACCUMULATED["$phase_name"] + elapsed_ms))
+    
+    # Calculate accumulated seconds using awk with proper quoting
+    local accumulated_sec=$(awk "BEGIN {printf \"%.2f\", ${TIMER_ACCUMULATED[$phase_name]} / 1000}")
+    echo "[DEBUG] $(date '+%Y-%m-%d %H:%M:%S') - ⏱️ Completed phase: $phase_name (elapsed: ${elapsed_sec}s, accumulated: ${accumulated_sec}s)"
+}
+
+# Print timer summary
+# Usage: print_timer_summary
+print_timer_summary() {
+    if [ "$DEBUG" != "true" ]; then
+        return
+    fi
+    
+    echo ""
+    echo "[DEBUG] $(date '+%Y-%m-%d %H:%M:%S') - ===== TIMER SUMMARY ====="
+    
+    local total_ms=0
+    for phase in "${!TIMER_ACCUMULATED[@]}"; do
+        local elapsed_ms="${TIMER_ACCUMULATED[$phase]}"
+        local elapsed_sec=$(awk "BEGIN {printf \"%.2f\", $elapsed_ms / 1000}")
+        echo "[DEBUG]         $phase: ${elapsed_sec}s"
+        total_ms=$((total_ms + elapsed_ms))
+    done
+    
+    local total_sec=$(awk "BEGIN {printf \"%.2f\", $total_ms / 1000}")
+    echo "[DEBUG]         Total measured: ${total_sec}s"
+    echo "[DEBUG] ======================="
+}
+
 # ==============================================
 # Security validation functions (isolated module)
 # ==============================================
@@ -593,6 +660,7 @@ check_all() {
         return
     fi
     
+    start_timer "check_all"
     echo "Checking system prerequisites..."
     echo "--------------------------------"
     
@@ -642,6 +710,8 @@ check_all() {
     echo "Prerequisites check completed successfully!"
     echo "----------------------------------------"
     echo ""
+    
+    end_timer "check_all"
 }
 
 # Check dependencies
@@ -1471,11 +1541,13 @@ parse_fio_result() {
     local write_clat_p95_ns=$(jq -r '.jobs[0].write.clat_ns.percentile."95.000000" // 0' "$json_file" 2>/dev/null)
     local write_clat_p99_ns=$(jq -r '.jobs[0].write.clat_ns.percentile."99.000000" // 0' "$json_file" 2>/dev/null)
     
-    # Extract min/max latency
+    # Extract min/max/mean latency
     local read_clat_min_ns=$(jq -r '.jobs[0].read.clat_ns.min // 0' "$json_file" 2>/dev/null)
     local read_clat_max_ns=$(jq -r '.jobs[0].read.clat_ns.max // 0' "$json_file" 2>/dev/null)
+    local read_clat_mean_ns=$(jq -r '.jobs[0].read.clat_ns.mean // 0' "$json_file" 2>/dev/null)
     local write_clat_min_ns=$(jq -r '.jobs[0].write.clat_ns.min // 0' "$json_file" 2>/dev/null)
     local write_clat_max_ns=$(jq -r '.jobs[0].write.clat_ns.max // 0' "$json_file" 2>/dev/null)
+    local write_clat_mean_ns=$(jq -r '.jobs[0].write.clat_ns.mean // 0' "$json_file" 2>/dev/null)
     
     # Extract device utilization
     local util=$(jq -r '.jobs[0].utilization // 0' "$json_file" 2>/dev/null)
@@ -1495,6 +1567,8 @@ parse_fio_result() {
     local read_clat_max_ms=$(awk "BEGIN {printf \"%.6f\", $read_clat_max_ns / 1000000}" 2>/dev/null || echo "0")
     local write_clat_min_ms=$(awk "BEGIN {printf \"%.6f\", $write_clat_min_ns / 1000000}" 2>/dev/null || echo "0")
     local write_clat_max_ms=$(awk "BEGIN {printf \"%.6f\", $write_clat_max_ns / 1000000}" 2>/dev/null || echo "0")
+    local read_clat_mean_ms=$(awk "BEGIN {printf \"%.6f\", $read_clat_mean_ns / 1000000}" 2>/dev/null || echo "0")
+    local write_clat_mean_ms=$(awk "BEGIN {printf \"%.6f\", $write_clat_mean_ns / 1000000}" 2>/dev/null || echo "0")
     
     # Save metrics (uppercase profile name as prefix)
     local prefix="FIO_${profile^^}"
@@ -1510,8 +1584,10 @@ parse_fio_result() {
     echo "${prefix}_WRITE_LAT_P99_MS=${write_clat_p99_ms}" >> "$TMP_DIR/metrics.env"
     echo "${prefix}_READ_LAT_MIN_MS=${read_clat_min_ms}" >> "$TMP_DIR/metrics.env"
     echo "${prefix}_READ_LAT_MAX_MS=${read_clat_max_ms}" >> "$TMP_DIR/metrics.env"
+    echo "${prefix}_READ_LAT_MEAN_MS=${read_clat_mean_ms}" >> "$TMP_DIR/metrics.env"
     echo "${prefix}_WRITE_LAT_MIN_MS=${write_clat_min_ms}" >> "$TMP_DIR/metrics.env"
     echo "${prefix}_WRITE_LAT_MAX_MS=${write_clat_max_ms}" >> "$TMP_DIR/metrics.env"
+    echo "${prefix}_WRITE_LAT_MEAN_MS=${write_clat_mean_ms}" >> "$TMP_DIR/metrics.env"
     echo "${prefix}_UTIL=${util}" >> "$TMP_DIR/metrics.env"
     echo "${prefix}_READ_IOPS_STDDEV=${read_iops_stddev}" >> "$TMP_DIR/metrics.env"
     echo "${prefix}_WRITE_IOPS_STDDEV=${write_iops_stddev}" >> "$TMP_DIR/metrics.env"
@@ -1523,8 +1599,8 @@ parse_fio_result() {
     echo "    Write IOPS: $write_iops (stddev: $write_iops_stddev)"
     echo "    Read BW: $((read_bw / 1024 / 1024))MB/s"
     echo "    Write BW: $((write_bw / 1024 / 1024))MB/s"
-    echo "    Read Latency (ms): min=${read_clat_min_ms}, P50=${read_clat_p50_ms}, P95=${read_clat_p95_ms}, P99=${read_clat_p99_ms}, max=${read_clat_max_ms}"
-    echo "    Write Latency (ms): min=${write_clat_min_ms}, P50=${write_clat_p50_ms}, P95=${write_clat_p95_ms}, P99=${write_clat_p99_ms}, max=${write_clat_max_ms}"
+    echo "    Read Latency (ms): min=${read_clat_min_ms}, mean=${read_clat_mean_ms}, P50=${read_clat_p50_ms}, P95=${read_clat_p95_ms}, P99=${read_clat_p99_ms}, max=${read_clat_max_ms}"
+    echo "    Write Latency (ms): min=${write_clat_min_ms}, mean=${write_clat_mean_ms}, P50=${write_clat_p50_ms}, P95=${write_clat_p95_ms}, P99=${write_clat_p99_ms}, max=${write_clat_max_ms}"
     echo "    Device Utilization: ${util}%"
 }
 
@@ -1609,6 +1685,7 @@ run_network_test() {
 
 # Serial network test (sequential testing)
 run_serial_network_test() {
+    start_timer "network_test_serial"
     local port="${NETWORK_PORT:-25201}"
     local duration="${DURATION:-60}"
     local parallel="${NETWORK_PARALLEL:-1}"
@@ -1759,6 +1836,7 @@ run_serial_network_test() {
         sleep 1
     fi
     
+    end_timer "network_test_serial"
     return 0
 }
 
@@ -1944,6 +2022,7 @@ run_multi_server_network_test() {
 
 # Matrix network test (all-to-all cross testing)
 run_matrix_network_test() {
+    start_timer "network_test_matrix"
     echo "=== Matrix Network Performance Test (All-to-All) ==="
     
     # Get local IP address
@@ -2097,10 +2176,13 @@ run_matrix_network_test() {
     
     echo ""
     echo "✓ Matrix network test completed"
+    
+    end_timer "network_test_matrix"
 }
 
 # Parallel network test (concurrent testing)
 run_parallel_network_test() {
+    start_timer "network_test_parallel"
     echo "=== Parallel Network Performance Test ==="
     
     local port="${NETWORK_PORT:-25201}"
@@ -2215,6 +2297,8 @@ run_parallel_network_test() {
     
     echo ""
     echo "✓ Parallel network test completed"
+    
+    end_timer "network_test_parallel"
 }
 
 # Generate parallel test report
@@ -3812,6 +3896,8 @@ EOF
 
 # Main function
 main() {
+    start_timer "main_total"
+    
     # Capture full execution command
     local full_command="$0"
     for arg in "$@"; do
@@ -4182,8 +4268,14 @@ main() {
                                     remote_test_command="$remote_test_command FIO_IODEPTH=${FIO_IODEPTH:-64}"
                                     remote_test_command="$remote_test_command FIO_NUMJOBS=${FIO_NUMJOBS:-4}"
                                     remote_test_command="$remote_test_command FIO_DIRECT=${FIO_DIRECT:-1}"
+                                    remote_test_command="$remote_test_command FIO_IOENGINE=${FIO_IOENGINE:-libaio}"
+                                    remote_test_command="$remote_test_command FIO_FILE_NUM=${FIO_FILE_NUM:-4}"
                                 else
                                     remote_test_command="$remote_test_command SYSBENCH_PROFILES=\"${SYSBENCH_PROFILES:-rndrw}\""
+                                    remote_test_command="$remote_test_command SYSBENCH_IO_MODE=\"${SYSBENCH_IO_MODE:-sync}\""
+                                    remote_test_command="$remote_test_command SYSBENCH_EXTRA_FLAGS=\"${SYSBENCH_EXTRA_FLAGS:-direct}\""
+                                    remote_test_command="$remote_test_command SYSBENCH_THREADS=\"${SYSBENCH_THREADS:-4}\""
+                                    remote_test_command="$remote_test_command SYSBENCH_BLOCK_SIZE=\"${SYSBENCH_BLOCK_SIZE:-16K}\""
                                 fi
                                 # Support new IO_PATH parameter with backward compatibility
                                 remote_test_command="$remote_test_command IO_TOTAL_SIZE=${IO_TOTAL_SIZE:-1G} SYSBENCH_FILE_NUM=${SYSBENCH_FILE_NUM:-1} SYSBENCH_DURATION=${SYSBENCH_DURATION:-$DURATION} IO_PATH=${IO_PATH:-${IO_TEST_PATH:-$HOME/oscheckperf/io_test}}"
@@ -4355,14 +4447,23 @@ main() {
         # Generate report
         generate_report
         
+        # End main timer before printing summary
+        end_timer "main_total"
+        
+        # Print timer summary in debug mode
+        print_timer_summary
+        
         echo ""
         echo "=== Benchmark completed successfully! ==="
         echo "Report: $OUTPUT_DIR/report_benchmark_${TIMESTAMP}.log"
         echo "Detailed results: $OUTPUT_DIR/data_${TIMESTAMP}_all_results.log"
         echo "Original data: $OUTPUT_DIR/original_data_${TIMESTAMP}_all_results.log"
     elif [ "$DRY_RUN" = true ]; then
+        end_timer "main_total"
         echo ""
         echo "[DRY RUN] Report generation skipped"
+    else
+        end_timer "main_total"
     fi
 }
 

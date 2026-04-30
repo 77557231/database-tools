@@ -7,3 +7,6 @@ tools/oscheckperf_test.sh
 tools/oscheckperf_validate_logs.sh
 test*
 servers.txt
+tools/rules.md
+tools/skill.md
+
