@@ -10,12 +10,16 @@ A system-level performance benchmarking tool designed for Vastbase, openGauss, a
 - ✅ **Multi-Tool Support**: IO testing supports both sysbench and fio
 - ✅ **Multi-Server Support**: Network testing supports multiple IP configurations (requires SSH passwordless login)
 - ✅ **Detailed Reports**: Generate structured test reports
+- ✅ **Security Enhancement**: Path validation, disk space check, process management optimization, protecting production environment
+- ✅ **Debug Modes**: Support `--debug` and `--dry-run` modes for troubleshooting and command preview
 
 ## Project Structure
 
 ```
 $HOME/oscheckperf/
 ├── oscheckperf              # Main entry script
+├── sysbench-1.0.20/         # sysbench source code compilation directory (auto downloaded by -i flag)
+├── sysbench-1.0.20.tar.gz   # sysbench source code archive (auto downloaded)
 ├── output/                   # Test results output directory (in current directory)
 │   ├── original_data_*_all_results.log  # Raw test data summary
 │   ├── data_*_all_results.log           # Parsed test results
