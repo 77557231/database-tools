@@ -1,7 +1,7 @@
 #!/bin/bash
 #--------------------------------------------------------------------------------
 #-- File name:   oscheckperf
-#-- Version:     v0.6.8
+#-- Version:     v0.6.9
 #-- Purpose:     Database System Benchmark Tool
 #-- Author:      Vastbase Performance Team
 #-- Description: One-click system benchmarking tool, supports configuration via config file or command line parameters
@@ -88,7 +88,7 @@ parse_args() {
                 exit 0
                 ;;
             --version)
-                echo "Version: 0.6.8"
+                echo "Version: 0.6.9"
                 exit 0
                 ;;
             --dry-run)
@@ -3204,9 +3204,9 @@ generate_report() {
             # Count CPU test sections (one per server)
             local cpu_section_count=$(grep -c "CPU TEST RESULTS" "$combined_file" 2>/dev/null)
             
-            if [ "$cpu_section_count" -gt 1 ]; then
+            if true; then
                 # Multiple servers - show comparison table
-                echo "  CPU Test Comparison (Multiple Servers)" >> "$report_file"
+                echo "  CPU Test Results" >> "$report_file"
                 echo "  ======================================" >> "$report_file"
                 printf "  %-20s %-15s %-15s %-15s %-15s\n" "Server IP" "Events/sec" "Avg Latency (ms)" "P95 Latency (ms)" "Max Latency (ms)" >> "$report_file"
                 echo "  -------------------------------------------------------------------------------------" >> "$report_file"
@@ -3302,8 +3302,8 @@ EOF
         if grep -q "MEMORY TEST RESULTS" "$combined_file" 2>/dev/null; then
             local mem_section_count=$(grep -c "MEMORY TEST RESULTS" "$combined_file" 2>/dev/null)
             
-            if [ "$mem_section_count" -gt 1 ]; then
-                echo "  Memory Test Comparison (Multiple Servers)" >> "$report_file"
+            if true; then
+                echo "  Memory Test Results" >> "$report_file"
                 echo "  =========================================" >> "$report_file"
                 printf "  %-20s %-15s %-15s %-15s\n" "Server IP" "Ops/sec" "MiB/sec" "Avg Latency (ms)" >> "$report_file"
                 echo "  ----------------------------------------" >> "$report_file"
@@ -3387,9 +3387,9 @@ EOF
             # Count unique IO test sections (each section starts with "SYSBENCH FILEIO TEST RESULTS" or "FIO TEST RESULTS" or "IO TEST RESULTS")
             local io_section_count=$(($(grep -c "^SYSBENCH FILEIO TEST RESULTS\|^FIO TEST RESULTS\|^IO TEST RESULTS" "$combined_file" 2>/dev/null)))
             
-            if [ "$io_section_count" -gt 1 ]; then
+            if true; then
                 # Multiple servers - show comparison table
-                echo "  IO Test Comparison (Multiple Servers)" >> "$report_file"
+                echo "  IO Test Results" >> "$report_file"
                 echo "  =========================================================" >> "$report_file"
                 echo "  IO Tool: ${IO_TOOL:-sysbench}" >> "$report_file"
                 
@@ -3910,9 +3910,9 @@ EOF
             # Count Threads test sections (one per server)
             local threads_section_count=$(($(grep -c "Threads test summary:" "$combined_file" 2>/dev/null) + $(grep -c "THREADS TEST RESULTS" "$combined_file" 2>/dev/null)))
             
-            if [ "$threads_section_count" -gt 1 ]; then
+            if true; then
                 # Multiple servers - show comparison table
-                echo "  Threads Test Comparison (Multiple Servers)" >> "$report_file"
+                echo "  Threads Test Results" >> "$report_file"
                 echo "  ==========================================" >> "$report_file"
                 printf "  %-20s %-15s %-15s %-15s\n" "Server IP" "Events/sec" "Avg Latency (ms)" "P95 Latency (ms)" >> "$report_file"
                 echo "  -----------------------------------------" >> "$report_file"
@@ -4053,9 +4053,9 @@ EOF
             # Count Mutex test sections (one per server)
             local mutex_section_count=$(($(grep -c "Mutex test summary:" "$combined_file" 2>/dev/null) + $(grep -c "MUTEX TEST RESULTS" "$combined_file" 2>/dev/null)))
             
-            if [ "$mutex_section_count" -gt 1 ]; then
+            if true; then
                 # Multiple servers - show comparison table
-                echo "  Mutex Test Comparison (Multiple Servers)" >> "$report_file"
+                echo "  Mutex Test Results" >> "$report_file"
                 echo "  =========================================" >> "$report_file"
                 printf "  %-20s %-15s %-15s %-15s\n" "Server IP" "Transactions" "TPS" "Avg Latency (ms)" >> "$report_file"
                 echo "  -----------------------------------------" >> "$report_file"
