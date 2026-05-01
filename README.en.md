@@ -234,16 +234,30 @@ cat output/report_benchmark_*.log
 - **events/sec**: Events per second (higher is better)
 - **avg latency**: Average latency (lower is better)
 - **P95/P99 latency**: 95th/99th percentile latency (lower is better)
+- **Threads fairness**: Thread fairness metrics, events and execution time mean/std deviation
 
 ### Memory Test
 - **operations/sec**: Memory operations per second (higher is better)
 - **throughput**: Memory throughput in MB/s (higher is better)
 - **avg latency**: Average latency (lower is better)
+- **P95 latency**: 95th percentile latency (lower is better)
 
 ### IO Test
 - **IOPS**: IO operations per second (higher is better)
 - **Bandwidth**: Throughput in MB/s (higher is better)
 - **Latency**: Latency (lower is better)
+- **fsyncs/s**: Fsync operations per second (sysbench only)
+- **Min/Max/P95/P99 latency**: Minimum/Maximum/95th/99th percentile latency (fio only)
+- **Device utilization**: Device utilization rate (fio only)
+- **CPU user/system**: CPU user/system utilization (fio only)
+
+### Network Test
+- **Bandwidth**: Network bandwidth in MB/s (higher is better)
+- **Retransmits**: Number of retransmissions (lower is better)
+- **RTT (ms)**: Round-trip time, includes min/max values (lower is better)
+- **CPU**: Sender and receiver CPU utilization
+- **Jitter**: Jitter (UDP only, lower is better)
+- **Packet loss**: Packet loss rate (UDP only, lower is better)
 
 ### IO Benchmark Details
 
