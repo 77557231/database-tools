@@ -234,7 +234,7 @@ cat output/report_benchmark_*.log
 - **events/sec**: Events per second (higher is better)
 - **avg latency**: Average latency (lower is better)
 - **P95/P99 latency**: 95th/99th percentile latency (lower is better)
-- **Threads fairness**: Thread fairness metrics, events and execution time mean/std deviation
+- **Threads Fairness**: Thread fairness metrics, indicating the balance of event distribution and execution time across threads (closer to 1.0 is better)
 
 ### Memory Test
 - **operations/sec**: Memory operations per second (higher is better)
@@ -246,15 +246,20 @@ cat output/report_benchmark_*.log
 - **IOPS**: IO operations per second (higher is better)
 - **Bandwidth**: Throughput in MB/s (higher is better)
 - **Latency**: Latency (lower is better)
-- **fsyncs/s**: Fsync operations per second (sysbench only)
+- **fsyncs/s**: Fsync operations per second (sysbench only, measures synchronous write performance)
 - **Min/Max/P95/P99 latency**: Minimum/Maximum/95th/99th percentile latency (fio only)
 - **Device utilization**: Device utilization rate (fio only)
 - **CPU user/system**: CPU user/system utilization (fio only)
+- **bw_min/bw_max**: Minimum/maximum bandwidth (fio only, reflects bandwidth stability)
+- **slat/clat**: Submission latency/Completion latency (fio only, slat is time to submit IO to device, clat is time for device to complete)
+- **ctx/majf/minf**: Context switches/Major page faults/Minor page faults (fio only, reflects system resource usage)
+- **iodepth_level**: IO queue depth level (fio only, reflects IO concurrency level)
 
 ### Network Test
 - **Bandwidth**: Network bandwidth in MB/s (higher is better)
-- **Retransmits**: Number of retransmissions (lower is better)
-- **RTT (ms)**: Round-trip time, includes min/max values (lower is better)
+- **Retransmits**: TCP retransmission count (lower is better, indicates network quality)
+- **RTT (min/max/mean)**: Round-trip time minimum/maximum/average (lower is better)
+- **TCP Congestion**: TCP congestion control algorithm (affects network transmission efficiency)
 - **CPU**: Sender and receiver CPU utilization
 - **Jitter**: Jitter (UDP only, lower is better)
 - **Packet loss**: Packet loss rate (UDP only, lower is better)

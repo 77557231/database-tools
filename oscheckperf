@@ -1,9 +1,9 @@
 #!/bin/bash
 #--------------------------------------------------------------------------------
 #-- File name:   oscheckperf
-#-- Version:     v0.6.9
+#-- Version:     v0.7.0
 #-- Purpose:     Database System Benchmark Tool
-#-- Author:      Vastbase Performance Team
+#-- Author:      Vastbase Second-line Team
 #-- Description: One-click system benchmarking tool, supports configuration via config file or command line parameters
 #--------------------------------------------------------------------------------
 
@@ -88,7 +88,7 @@ parse_args() {
                 exit 0
                 ;;
             --version)
-                echo "Version: 0.6.9"
+                echo "Version: 0.7.0"
                 exit 0
                 ;;
             --dry-run)
@@ -640,6 +640,55 @@ wait_with_timeout() {
     done
     
     return 0
+}
+
+# Run all selected benchmark tests (CPU, Memory, IO, Threads, Mutex, Pgbench)
+# This function is used by both single-machine and cluster modes to avoid code duplication
+run_all_selected_tests() {
+    if [ "$CPU_ENABLED" != "false" ]; then
+        run_cpu_test
+    fi
+
+    if [ "$MEMORY_ENABLED" != "false" ]; then
+        run_memory_test
+    fi
+
+    if [ "$IO_ENABLED" != "false" ]; then
+        run_io_test
+    fi
+
+    if [ "$THREADS_ENABLED" != "false" ]; then
+        run_threads_test
+    fi
+
+    if [ "$MUTEX_ENABLED" != "false" ]; then
+        run_mutex_test
+    fi
+
+    if [ "$PGBENCH_ENABLED" = "true" ]; then
+        run_pgbench_test
+    fi
+}
+
+# Append server header to original_data log file for traceability
+append_server_header_to_original() {
+    local target_ip="$1"
+    local original_file="$OUTPUT_DIR/original_data_${TIMESTAMP}_all_results.log"
+
+    echo "" >> "$original_file"
+    echo "================================================================================" >> "$original_file"
+    echo "RESULTS FROM SERVER: $target_ip" >> "$original_file"
+    echo "================================================================================" >> "$original_file"
+}
+
+# Format number to 2 decimal places
+format_number() {
+    local num="$1"
+    if [ "$num" != "N/A" ] && [ -n "$num" ]; then
+        awk "BEGIN {printf \"%.2f\", $num}" 2>/dev/null || echo "$num"
+    else
+        echo "N/A"
+    fi
 }
 
 # Load configuration file
@@ -3204,87 +3253,51 @@ generate_report() {
             # Count CPU test sections (one per server)
             local cpu_section_count=$(grep -c "CPU TEST RESULTS" "$combined_file" 2>/dev/null)
             
-            if true; then
-                # Multiple servers - show comparison table
-                echo "  CPU Test Results" >> "$report_file"
-                echo "  ======================================" >> "$report_file"
-                printf "  %-20s %-15s %-15s %-15s %-15s\n" "Server IP" "Events/sec" "Avg Latency (ms)" "P95 Latency (ms)" "Max Latency (ms)" >> "$report_file"
-                echo "  -------------------------------------------------------------------------------------" >> "$report_file"
-                
-                local in_cpu_section=false
-                local current_server_ip=""
-                local current_eps=""
-                local current_avg_lat=""
-                local current_p95_lat=""
-                local current_max_lat=""
-                
-                while IFS= read -r line; do
-                    if [[ "$line" =~ "CPU TEST RESULTS" ]]; then
-                        if [ "$in_cpu_section" = true ] && [ -n "$current_server_ip" ]; then
-                            printf "  %-20s %-15s %-15s %-15s %-15s\n" "$current_server_ip" "${current_eps:-N/A}" "${current_avg_lat:-N/A}" "${current_p95_lat:-N/A}" "${current_max_lat:-N/A}" >> "$report_file"
-                        fi
-                        in_cpu_section=true
-                        current_server_ip=$(echo "$line" | grep -oP 'Server: \K[0-9.]+' || echo "N/A")
-                        current_eps=""
-                        current_avg_lat=""
-                        current_p95_lat=""
-                        current_max_lat=""
-                    elif [[ "$line" =~ "MEMORY TEST RESULTS" || "$line" =~ "SYSBENCH FILEIO TEST RESULTS" || "$line" =~ "THREADS TEST RESULTS" || "$line" =~ "MUTEX TEST RESULTS" || "$line" =~ "NETWORK TEST RESULTS" ]]; then
-                        # End of CPU section when encountering next test type
-                        if [ "$in_cpu_section" = true ] && [ -n "$current_server_ip" ]; then
-                            printf "  %-20s %-15s %-15s %-15s %-15s\n" "$current_server_ip" "${current_eps:-N/A}" "${current_avg_lat:-N/A}" "${current_p95_lat:-N/A}" "${current_max_lat:-N/A}" >> "$report_file"
-                        fi
-                        in_cpu_section=false
-                    elif [ "$in_cpu_section" = true ]; then
-                        if [[ "$line" =~ "events per second:" ]]; then
-                            current_eps=$(echo "$line" | awk '{print $NF}')
-                        elif [[ "$line" =~ "avg:" ]] && [[ "$line" =~ [0-9] ]] && [[ ! "$line" =~ "events (avg/stddev):" ]] && [[ ! "$line" =~ "execution time" ]]; then
-                            current_avg_lat=$(echo "$line" | awk '{print $NF}')
-                        elif [[ "$line" =~ "95th percentile:" ]]; then
-                            current_p95_lat=$(echo "$line" | awk '{print $NF}')
-                        elif [[ "$line" =~ "max:" ]] && [[ "$line" =~ [0-9] ]] && [[ ! "$line" =~ "execution time" ]]; then
-                            current_max_lat=$(echo "$line" | awk '{print $NF}' | tr -d ',')
-                        fi
-                    fi
-                done < "$combined_file"
-                
-                if [ "$in_cpu_section" = true ] && [ -n "$current_server_ip" ]; then
-                    printf "  %-20s %-15s %-15s %-15s %-15s\n" "$current_server_ip" "${current_eps:-N/A}" "${current_avg_lat:-N/A}" "${current_p95_lat:-N/A}" "${current_max_lat:-N/A}" >> "$report_file"
-                fi
-            else
-                # Single server - show results directly
-                local cpu_events=$(grep -A50 "CPU TEST RESULTS" "$combined_file" 2>/dev/null | grep "events per second:" | awk '{print $NF}')
-                local cpu_avg_lat=$(grep -A50 "CPU TEST RESULTS" "$combined_file" 2>/dev/null | grep "avg:" | grep -v "avg/stddev" | awk '{print $NF}')
-                local cpu_p95_lat=$(grep -A50 "CPU TEST RESULTS" "$combined_file" 2>/dev/null | grep "95th percentile:" | awk '{print $NF}')
-                local cpu_max_lat=$(grep -A50 "CPU TEST RESULTS" "$combined_file" 2>/dev/null | grep "max:" | grep -v "execution time" | awk '{print $NF}')
-                # Extract only the values from threads fairness lines
-                local cpu_threads_fairness_events=$(grep -A50 "CPU TEST RESULTS" "$combined_file" 2>/dev/null | grep "events (avg/stddev):" | head -1 | sed -E 's/.*events \(avg\/stddev\):\s+//')
-                local cpu_threads_fairness_time=$(grep -A50 "CPU TEST RESULTS" "$combined_file" 2>/dev/null | grep "execution time (avg/stddev):" | head -1 | sed -E 's/.*execution time \(avg\/stddev\):\s+//')
+            # Show comparison table
+            echo "  CPU Test Results" >> "$report_file"
+            echo "  ======================================" >> "$report_file"
+            printf "  %-20s %-15s %-15s %-15s %-15s\n" "Server IP" "Events/sec" "Avg Latency (ms)" "P95 Latency (ms)" "Max Latency (ms)" >> "$report_file"
+            echo "  -------------------------------------------------------------------------------------" >> "$report_file"
 
-                if [ -n "$cpu_events" ]; then
-                    # Format values to 2 decimal places
-                    local fmt_cpu_events=$(awk "BEGIN {printf \"%.2f\", $cpu_events}" 2>/dev/null || echo "$cpu_events")
-                    local fmt_cpu_avg_lat=$(awk "BEGIN {printf \"%.2f\", $cpu_avg_lat}" 2>/dev/null || echo "${cpu_avg_lat:-N/A}")
-                    local fmt_cpu_p95_lat=$(awk "BEGIN {printf \"%.2f\", $cpu_p95_lat}" 2>/dev/null || echo "${cpu_p95_lat:-N/A}")
-                    local fmt_cpu_max_lat=$(awk "BEGIN {printf \"%.2f\", $cpu_max_lat}" 2>/dev/null || echo "${cpu_max_lat:-N/A}")
-                    
-                    # Format threads fairness for display
-                    local cpu_fairness_str="N/A"
-                    if [ -n "$cpu_threads_fairness_events" ]; then
-                        cpu_fairness_str="${cpu_threads_fairness_events}"
+            local in_cpu_section=false
+            local current_server_ip=""
+            local current_eps=""
+            local current_avg_lat=""
+            local current_p95_lat=""
+            local current_max_lat=""
+
+            while IFS= read -r line; do
+                if [[ "$line" =~ "CPU TEST RESULTS" ]]; then
+                    if [ "$in_cpu_section" = true ] && [ -n "$current_server_ip" ]; then
+                        printf "  %-20s %-15s %-15s %-15s %-15s\n" "$current_server_ip" "${current_eps:-N/A}" "${current_avg_lat:-N/A}" "${current_p95_lat:-N/A}" "${current_max_lat:-N/A}" >> "$report_file"
                     fi
-                    
-                    # Output in table format consistent with multi-server mode
-                    echo "  CPU Test Results" >> "$report_file"
-                    echo "  ================" >> "$report_file"
-                    echo "  -------------------------------------------------------------------------------------" >> "$report_file"
-                    printf "  %-20s %-15s %-15s %-15s %-15s %-20s\n" "Server IP" "Events/sec" "Avg Latency (ms)" "P95 Latency (ms)" "Max Latency (ms)" "Threads Fairness" >> "$report_file"
-                    echo "  -------------------------------------------------------------------------------------" >> "$report_file"
-                    printf "  %-20s %-15s %-15s %-15s %-15s %-20s\n" "$local_ip" "$fmt_cpu_events" "$fmt_cpu_avg_lat" "$fmt_cpu_p95_lat" "$fmt_cpu_max_lat" "$cpu_fairness_str" >> "$report_file"
-                    echo "  -------------------------------------------------------------------------------------" >> "$report_file"
-                else
-                    echo "  Test not executed" >> "$report_file"
+                    in_cpu_section=true
+                    current_server_ip=$(echo "$line" | grep -oP 'Server: \K[0-9.]+' || echo "N/A")
+                    current_eps=""
+                    current_avg_lat=""
+                    current_p95_lat=""
+                    current_max_lat=""
+                elif [[ "$line" =~ "MEMORY TEST RESULTS" || "$line" =~ "SYSBENCH FILEIO TEST RESULTS" || "$line" =~ "THREADS TEST RESULTS" || "$line" =~ "MUTEX TEST RESULTS" || "$line" =~ "NETWORK TEST RESULTS" ]]; then
+                    # End of CPU section when encountering next test type
+                    if [ "$in_cpu_section" = true ] && [ -n "$current_server_ip" ]; then
+                        printf "  %-20s %-15s %-15s %-15s %-15s\n" "$current_server_ip" "${current_eps:-N/A}" "${current_avg_lat:-N/A}" "${current_p95_lat:-N/A}" "${current_max_lat:-N/A}" >> "$report_file"
+                    fi
+                    in_cpu_section=false
+                elif [ "$in_cpu_section" = true ]; then
+                    if [[ "$line" =~ "events per second:" ]]; then
+                        current_eps=$(echo "$line" | awk '{print $NF}')
+                    elif [[ "$line" =~ "avg:" ]] && [[ "$line" =~ [0-9] ]] && [[ ! "$line" =~ "events (avg/stddev):" ]] && [[ ! "$line" =~ "execution time" ]]; then
+                        current_avg_lat=$(echo "$line" | awk '{print $NF}')
+                    elif [[ "$line" =~ "95th percentile:" ]]; then
+                        current_p95_lat=$(echo "$line" | awk '{print $NF}')
+                    elif [[ "$line" =~ "max:" ]] && [[ "$line" =~ [0-9] ]] && [[ ! "$line" =~ "execution time" ]]; then
+                        current_max_lat=$(echo "$line" | awk '{print $NF}' | tr -d ',')
+                    fi
                 fi
+            done < "$combined_file"
+
+            if [ "$in_cpu_section" = true ] && [ -n "$current_server_ip" ]; then
+                printf "  %-20s %-15s %-15s %-15s %-15s\n" "$current_server_ip" "${current_eps:-N/A}" "${current_avg_lat:-N/A}" "${current_p95_lat:-N/A}" "${current_max_lat:-N/A}" >> "$report_file"
             fi
         else
             echo "  Test not executed" >> "$report_file"
@@ -3301,73 +3314,48 @@ EOF
     if [ -f "$combined_file" ]; then
         if grep -q "MEMORY TEST RESULTS" "$combined_file" 2>/dev/null; then
             local mem_section_count=$(grep -c "MEMORY TEST RESULTS" "$combined_file" 2>/dev/null)
-            
-            if true; then
-                echo "  Memory Test Results" >> "$report_file"
-                echo "  =========================================" >> "$report_file"
-                printf "  %-20s %-15s %-15s %-15s\n" "Server IP" "Ops/sec" "MiB/sec" "Avg Latency (ms)" >> "$report_file"
-                echo "  ----------------------------------------" >> "$report_file"
-                
-                local in_mem_section=false
-                local current_server_ip=""
-                local current_ops_sec=""
-                local current_mib_sec=""
-                local current_mem_avg_lat=""
-                
-                while IFS= read -r line; do
-                    if [[ "$line" =~ "MEMORY TEST RESULTS" ]]; then
-                        if [ "$in_mem_section" = true ] && [ -n "$current_server_ip" ]; then
-                            printf "  %-20s %-15s %-15s %-15s\n" "$current_server_ip" "${current_ops_sec:-N/A}" "${current_mib_sec:-N/A}" "${current_mem_avg_lat:-N/A}" >> "$report_file"
-                        fi
-                        in_mem_section=true
-                        current_server_ip=$(echo "$line" | grep -oP 'Server: \K[0-9.]+' || echo "N/A")
-                        current_ops_sec=""
-                        current_mib_sec=""
-                        current_mem_avg_lat=""
-                    elif [[ "$line" =~ "SYSBENCH FILEIO TEST RESULTS" || "$line" =~ "THREADS TEST RESULTS" || "$line" =~ "MUTEX TEST RESULTS" || "$line" =~ "NETWORK TEST RESULTS" ]]; then
-                        # End of Memory section when encountering next test type
-                        if [ "$in_mem_section" = true ] && [ -n "$current_server_ip" ]; then
-                            printf "  %-20s %-15s %-15s %-15s\n" "$current_server_ip" "${current_ops_sec:-N/A}" "${current_mib_sec:-N/A}" "${current_mem_avg_lat:-N/A}" >> "$report_file"
-                        fi
-                        in_mem_section=false
-                    elif [ "$in_mem_section" = true ]; then
-                        if [[ "$line" =~ "Total operations:" ]]; then
-                            current_ops_sec=$(echo "$line" | awk -F'[()]' '{print $2}' | awk '{print $1}')
-                        elif [[ "$line" =~ "MiB transferred" ]]; then
-                            current_mib_sec=$(echo "$line" | awk -F'[()]' '{print $2}' | awk '{print $1}')
-                        elif [[ "$line" =~ "avg:" ]]; then
-                            current_mem_avg_lat=$(echo "$line" | awk '{print $NF}' | tr -d ',')
-                        fi
+
+            # Show comparison table
+            echo "  Memory Test Results" >> "$report_file"
+            echo "  =========================================" >> "$report_file"
+            printf "  %-20s %-15s %-15s %-15s\n" "Server IP" "Ops/sec" "MiB/sec" "Avg Latency (ms)" >> "$report_file"
+            echo "  ----------------------------------------" >> "$report_file"
+
+            local in_mem_section=false
+            local current_server_ip=""
+            local current_ops_sec=""
+            local current_mib_sec=""
+            local current_mem_avg_lat=""
+
+            while IFS= read -r line; do
+                if [[ "$line" =~ "MEMORY TEST RESULTS" ]]; then
+                    if [ "$in_mem_section" = true ] && [ -n "$current_server_ip" ]; then
+                        printf "  %-20s %-15s %-15s %-15s\n" "$current_server_ip" "${current_ops_sec:-N/A}" "${current_mib_sec:-N/A}" "${current_mem_avg_lat:-N/A}" >> "$report_file"
                     fi
-                done < "$combined_file"
-                
-                if [ "$in_mem_section" = true ] && [ -n "$current_server_ip" ]; then
-                    printf "  %-20s %-15s %-15s %-15s\n" "$current_server_ip" "${current_ops_sec:-N/A}" "${current_mib_sec:-N/A}" "${current_mem_avg_lat:-N/A}" >> "$report_file"
+                    in_mem_section=true
+                    current_server_ip=$(echo "$line" | grep -oP 'Server: \K[0-9.]+' || echo "N/A")
+                    current_ops_sec=""
+                    current_mib_sec=""
+                    current_mem_avg_lat=""
+                elif [[ "$line" =~ "SYSBENCH FILEIO TEST RESULTS" || "$line" =~ "THREADS TEST RESULTS" || "$line" =~ "MUTEX TEST RESULTS" || "$line" =~ "NETWORK TEST RESULTS" ]]; then
+                    # End of Memory section when encountering next test type
+                    if [ "$in_mem_section" = true ] && [ -n "$current_server_ip" ]; then
+                        printf "  %-20s %-15s %-15s %-15s\n" "$current_server_ip" "${current_ops_sec:-N/A}" "${current_mib_sec:-N/A}" "${current_mem_avg_lat:-N/A}" >> "$report_file"
+                    fi
+                    in_mem_section=false
+                elif [ "$in_mem_section" = true ]; then
+                    if [[ "$line" =~ "Total operations:" ]]; then
+                        current_ops_sec=$(echo "$line" | awk -F'[()]' '{print $2}' | awk '{print $1}')
+                    elif [[ "$line" =~ "MiB transferred" ]]; then
+                        current_mib_sec=$(echo "$line" | awk -F'[()]' '{print $2}' | awk '{print $1}')
+                    elif [[ "$line" =~ "avg:" ]]; then
+                        current_mem_avg_lat=$(echo "$line" | awk '{print $NF}' | tr -d ',')
+                    fi
                 fi
-            else
-                # Single server - show results directly
-                local mem_total_ops_line=$(grep "Total operations:" "$combined_file" 2>/dev/null)
-                local mem_ops_sec=$(echo "$mem_total_ops_line" | awk -F'[()]' '{print $2}' | awk '{print $1}')
-                local mem_mib_sec=$(grep "MiB transferred" "$combined_file" 2>/dev/null | awk -F'[()]' '{print $2}' | awk '{print $1}')
-                local mem_avg_lat=$(grep -A30 "MEMORY TEST RESULTS" "$combined_file" 2>/dev/null | grep -A5 "Latency (ms):" | grep "avg:" | awk '{print $NF}')
-                
-                if [ -n "$mem_ops_sec" ]; then
-                    # Format values to 2 decimal places
-                    local fmt_ops_sec=$(awk "BEGIN {printf \"%.2f\", $mem_ops_sec}" 2>/dev/null || echo "$mem_ops_sec")
-                    local fmt_mib_sec=$(awk "BEGIN {printf \"%.2f\", $mem_mib_sec}" 2>/dev/null || echo "$mem_mib_sec")
-                    local fmt_avg_lat=$(awk "BEGIN {printf \"%.2f\", $mem_avg_lat}" 2>/dev/null || echo "${mem_avg_lat:-N/A}")
-                    
-                    # Output in table format consistent with multi-server mode
-                    echo "  Memory Test Results" >> "$report_file"
-                    echo "  ====================" >> "$report_file"
-                    echo "  ----------------------------------------" >> "$report_file"
-                    printf "  %-20s %-15s %-15s %-15s\n" "Server IP" "Ops/sec" "MiB/sec" "Avg Latency (ms)" >> "$report_file"
-                    echo "  ----------------------------------------" >> "$report_file"
-                    printf "  %-20s %-15s %-15s %-15s\n" "$local_ip" "$fmt_ops_sec" "$fmt_mib_sec" "$fmt_avg_lat" >> "$report_file"
-                    echo "  ----------------------------------------" >> "$report_file"
-                else
-                    echo "  Test not executed" >> "$report_file"
-                fi
+            done < "$combined_file"
+
+            if [ "$in_mem_section" = true ] && [ -n "$current_server_ip" ]; then
+                printf "  %-20s %-15s %-15s %-15s\n" "$current_server_ip" "${current_ops_sec:-N/A}" "${current_mib_sec:-N/A}" "${current_mem_avg_lat:-N/A}" >> "$report_file"
             fi
         else
             echo "  Test not executed" >> "$report_file"
@@ -3386,10 +3374,9 @@ EOF
         if grep -q "SYSBENCH FILEIO TEST RESULTS\|FIO TEST RESULTS\|IO TEST RESULTS" "$combined_file" 2>/dev/null; then
             # Count unique IO test sections (each section starts with "SYSBENCH FILEIO TEST RESULTS" or "FIO TEST RESULTS" or "IO TEST RESULTS")
             local io_section_count=$(($(grep -c "^SYSBENCH FILEIO TEST RESULTS\|^FIO TEST RESULTS\|^IO TEST RESULTS" "$combined_file" 2>/dev/null)))
-            
-            if true; then
-                # Multiple servers - show comparison table
-                echo "  IO Test Results" >> "$report_file"
+
+            # Show comparison table
+            echo "  IO Test Results" >> "$report_file"
                 echo "  =========================================================" >> "$report_file"
                 echo "  IO Tool: ${IO_TOOL:-sysbench}" >> "$report_file"
                 
@@ -3711,187 +3698,6 @@ EOF
                     
                     rm -f "$results_temp_file" "$fio_extended_file"
                 fi
-            else
-                # Single server - show results directly
-                # Check if it's fio test
-                if grep -q "FIO TEST RESULTS" "$combined_file" 2>/dev/null; then
-                    # fio test results
-                    local fio_profiles=$(grep -oP 'FIO TEST RESULTS \(([^)]+)\)' "$combined_file" | awk -F'[()]' '{print $2}')
-                    echo "  FIO Test Results" >> "$report_file"
-                    echo "  =================" >> "$report_file"
-                    
-                    for profile in $fio_profiles; do
-                        # Get the section for this profile
-                        local profile_section=$(sed -n "/FIO TEST RESULTS ($profile)/,/FIO TEST RESULTS/p" "$combined_file" | head -n -1)
-                        
-                        # Parse core metrics from text output
-                        # Match lines with "read:" that contain IOPS (the actual result line, not the header)
-                        local read_line=$(echo "$profile_section" | grep "read:" | grep "IOPS" | head -1)
-                        local write_line=$(echo "$profile_section" | grep "write:" | grep "IOPS" | head -1)
-                        
-                        # Parse IOPS - handle format like "IOPS=31.8k," 
-                        local read_iops=$(echo "$read_line" | awk '{print $2}' | sed 's/IOPS=//;s/,//')
-                        if echo "$read_iops" | grep -q "k"; then
-                            read_iops=$(echo "$read_iops" | sed 's/k//' | awk '{printf "%.2f", $1 * 1000}')
-                        elif echo "$read_iops" | grep -q "M"; then
-                            read_iops=$(echo "$read_iops" | sed 's/M//' | awk '{printf "%.2f", $1 * 1000000}')
-                        fi
-                        
-                        local write_iops=""
-                        if [ -n "$write_line" ]; then
-                            write_iops=$(echo "$write_line" | awk '{print $2}' | sed 's/IOPS=//;s/,//')
-                            if echo "$write_iops" | grep -q "k"; then
-                                write_iops=$(echo "$write_iops" | sed 's/k//' | awk '{printf "%.2f", $1 * 1000}')
-                            elif echo "$write_iops" | grep -q "M"; then
-                                write_iops=$(echo "$write_iops" | sed 's/M//' | awk '{printf "%.2f", $1 * 1000000}')
-                            fi
-                        fi
-                        
-                        # Parse BW - handle format like "BW=497MiB/s"
-                        local read_bw=$(echo "$read_line" | awk '{print $3}' | sed 's/BW=//;s/MiB\/s//')
-                        local write_bw=""
-                        if [ -n "$write_line" ]; then
-                            write_bw=$(echo "$write_line" | awk '{print $3}' | sed 's/BW=//;s/MiB\/s//')
-                        fi
-                        
-                        # Parse latency from clat line - format: clat (usec): min=63, max=31606, avg=3190.51, stdev=2184.65
-                        local clat_line=$(echo "$profile_section" | grep "clat (usec):" | head -1)
-                        local min_lat_us=$(echo "$clat_line" | awk '{print $3}' | sed 's/min=//;s/,//')
-                        local max_lat_us=$(echo "$clat_line" | awk '{print $4}' | sed 's/max=//;s/,//')
-                        local avg_lat_us=$(echo "$clat_line" | awk '{print $5}' | sed 's/avg=//;s/,//')
-                        
-                        # Convert microseconds to milliseconds
-                        local avg_lat=$(awk "BEGIN {if ($avg_lat_us != 0) printf \"%.6f\", $avg_lat_us / 1000; else print \"N/A\"}" 2>/dev/null || echo "N/A")
-                        local min_lat=$(awk "BEGIN {if ($min_lat_us != 0) printf \"%.6f\", $min_lat_us / 1000; else print \"N/A\"}" 2>/dev/null || echo "N/A")
-                        local max_lat=$(awk "BEGIN {if ($max_lat_us != 0) printf \"%.6f\", $max_lat_us / 1000; else print \"N/A\"}" 2>/dev/null || echo "N/A")
-                        
-                        # Parse percentile latency from percentiles section - format: | 95.00th=[ 5669],
-                        local p95_line=$(echo "$profile_section" | grep "95.00th" | head -1)
-                        local p99_line=$(echo "$profile_section" | grep "99.00th" | head -1)
-                        local p95_lat_us=$(echo "$p95_line" | sed 's/.*95\.00th=\[\s*//;s/\s*\].*//')
-                        local p99_lat_us=$(echo "$p99_line" | sed 's/.*99\.00th=\[\s*//;s/\s*\].*//')
-                        
-                        local p95_lat=$(awk "BEGIN {if ($p95_lat_us != 0) printf \"%.6f\", $p95_lat_us / 1000; else print \"N/A\"}" 2>/dev/null || echo "N/A")
-                        local p99_lat=$(awk "BEGIN {if ($p99_lat_us != 0) printf \"%.6f\", $p99_lat_us / 1000; else print \"N/A\"}" 2>/dev/null || echo "N/A")
-                        
-                        # Parse CPU metrics - format: cpu          : usr=4.40%, sys=86.92%, ctx=6606, majf=0, minf=516
-                        local cpu_line=$(echo "$profile_section" | grep "^  cpu" | head -1)
-                        local cpu_user=$(echo "$cpu_line" | awk '{print $3}' | sed 's/usr=//;s/,//;s/%//')
-                        local cpu_sys=$(echo "$cpu_line" | awk '{print $4}' | sed 's/sys=//;s/,//;s/%//')
-                        
-                        # Parse disk utilization - only get the first one
-                        local util=$(echo "$profile_section" | grep -o "util=[0-9.]*%" | sed 's/util=//;s/%//' | head -1)
-                        if [ -z "$util" ]; then
-                            util=$(echo "$profile_section" | grep -o "util=[0-9.]*" | sed 's/util=//' | head -1)
-                        fi
-                        
-                        # Set default values if empty
-                        [ -z "$read_iops" ] && read_iops="0"
-                        [ -z "$write_iops" ] && write_iops="0"
-                        [ -z "$read_bw" ] && read_bw="0"
-                        [ -z "$write_bw" ] && write_bw="0"
-                        
-                        if [ "$read_iops" != "N/A" ] || [ "$write_iops" != "N/A" ]; then
-                            local total_iops="N/A"
-                            local total_bw="N/A"
-                            if [ "$read_iops" != "N/A" ] && [ "$write_iops" != "N/A" ]; then
-                                total_iops=$(awk "BEGIN {printf \"%.2f\", $read_iops + $write_iops}" 2>/dev/null || echo "N/A")
-                            fi
-                            if [ "$read_bw" != "N/A" ] && [ "$write_bw" != "N/A" ]; then
-                                total_bw=$(awk "BEGIN {printf \"%.2f\", $read_bw + $write_bw}" 2>/dev/null || echo "N/A")
-                            fi
-                            
-                            cat >> "$report_file" << EOF
-  Profile: $profile
-  Read IOPS:        ${read_iops:-N/A}
-  Write IOPS:       ${write_iops:-N/A}
-  Total IOPS:       ${total_iops}
-  Read BW:          ${read_bw:-N/A} MB/s
-  Write BW:         ${write_bw:-N/A} MB/s
-  Total BW:         ${total_bw}
-  Avg Latency:      ${avg_lat:-N/A} ms
-  Min Latency:      ${min_lat:-N/A} ms
-  Max Latency:      ${max_lat:-N/A} ms
-  P95 Latency:      ${p95_lat:-N/A} ms
-  P99 Latency:      ${p99_lat:-N/A} ms
-  Device Utilization: ${util:-N/A}%
-EOF
-                            # Display extended CPU metrics if available
-                            if [ "$cpu_user" != "N/A" ] || [ "$cpu_sys" != "N/A" ]; then
-                                echo "  Extended Metrics:" >> "$report_file"
-                                if [ "$cpu_user" != "N/A" ] && [ "$cpu_user" != "null" ]; then
-                                    echo "    CPU User: ${cpu_user}%" >> "$report_file"
-                                fi
-                                if [ "$cpu_sys" != "N/A" ] && [ "$cpu_sys" != "null" ]; then
-                                    echo "    CPU System: ${cpu_sys}%" >> "$report_file"
-                                fi
-                            fi
-                        fi
-                    done
-                else
-                    # sysbench test results
-                    local io_read_iops=$(grep "reads/s:" "$combined_file" 2>/dev/null | awk '{print $NF}')
-                    local io_write_iops=$(grep "writes/s:" "$combined_file" 2>/dev/null | awk '{print $NF}')
-                    local io_fsync_iops=$(grep "fsyncs/s:" "$combined_file" 2>/dev/null | awk '{print $NF}')
-                    local io_read_bw=$(grep "read, MiB/s:" "$combined_file" 2>/dev/null | awk '{print $NF}')
-                    local io_write_bw=$(grep "written, MiB/s:" "$combined_file" 2>/dev/null | awk '{print $NF}')
-                    
-                    # Extract sysbench IO section only (between "SYSBENCH FILEIO TEST RESULTS" and next test section)
-                    local sysbench_section=$(sed -n '/SYSBENCH FILEIO TEST RESULTS/,/^[A-Z ]* TEST RESULTS/p' "$combined_file" 2>/dev/null | head -n -1)
-                    
-                    # Extract latency metrics from sysbench output
-                    local latency_section=$(echo "$sysbench_section" | sed -n '/Latency (ms):/,/Threads fairness:/p')
-                    local io_avg_lat=$(echo "$latency_section" | grep -o "avg:.*" | awk '{print $2}' | tr -d ',' )
-                    local io_min_lat=$(echo "$latency_section" | grep -o "min:.*" | awk '{print $2}' | tr -d ',' )
-                    local io_max_lat=$(echo "$latency_section" | grep -o "max:.*" | awk '{print $2}' | tr -d ',' )
-                    local io_p95_lat=$(echo "$latency_section" | grep -o "95th percentile.*" | sed 's/95th percentile: *//' | awk '{print $1}')
-                    
-                    # Extract Threads Fairness only from sysbench IO section
-                    local io_threads_fair_section=$(echo "$sysbench_section" | sed -n '/Threads fairness:/,/^$/p')
-                    local io_events_fair=$(echo "$io_threads_fair_section" | grep "events (avg/stddev):" | awk '{print $NF}')
-                    local io_execution_fair=$(echo "$io_threads_fair_section" | grep "execution time (avg/stddev):" | awk '{print $NF}')
-
-                    if [ -n "$io_read_iops" ]; then
-                        local io_total_iops=$(awk "BEGIN {printf \"%.2f\", $io_read_iops + $io_write_iops}" 2>/dev/null || echo "N/A")
-                        local io_total_bw=$(awk "BEGIN {printf \"%.2f\", $io_read_bw + $io_write_bw}" 2>/dev/null || echo "N/A")
-
-                        # Format values to 2 decimal places
-                        local fmt_read_iops=$(awk "BEGIN {printf \"%.2f\", $io_read_iops}" 2>/dev/null || echo "$io_read_iops")
-                        local fmt_write_iops=$(awk "BEGIN {printf \"%.2f\", $io_write_iops}" 2>/dev/null || echo "$io_write_iops")
-                        local fmt_fsync=$(awk "BEGIN {printf \"%.2f\", $io_fsync_iops}" 2>/dev/null || echo "${io_fsync_iops:-N/A}")
-                        local fmt_read_bw=$(awk "BEGIN {printf \"%.2f\", $io_read_bw}" 2>/dev/null || echo "$io_read_bw")
-                        local fmt_write_bw=$(awk "BEGIN {printf \"%.2f\", $io_write_bw}" 2>/dev/null || echo "$io_write_bw")
-                        local fmt_avg_lat=$(awk "BEGIN {printf \"%.2f\", $io_avg_lat}" 2>/dev/null || echo "${io_avg_lat:-N/A}")
-                        local fmt_min_lat=$(awk "BEGIN {printf \"%.2f\", $io_min_lat}" 2>/dev/null || echo "${io_min_lat:-N/A}")
-                        local fmt_max_lat=$(awk "BEGIN {printf \"%.2f\", $io_max_lat}" 2>/dev/null || echo "${io_max_lat:-N/A}")
-                        local fmt_p95_lat=$(awk "BEGIN {printf \"%.2f\", $io_p95_lat}" 2>/dev/null || echo "${io_p95_lat:-N/A}")
-
-                        # Format threads fairness for display
-                        local io_fairness_str="N/A"
-                        if [ -n "$io_events_fair" ]; then
-                            io_fairness_str="${io_events_fair}"
-                        fi
-
-                        # Output in table format consistent with multi-server mode
-                        echo "  IO Test Results" >> "$report_file"
-                        echo "  ===============" >> "$report_file"
-                        echo "  IO Tool: sysbench" >> "$report_file"
-                        echo "  -------------------------------------------------------------------------------------------------------------------" >> "$report_file"
-                        printf "  %-20s %-12s %-12s %-12s %-12s %-12s %-12s %-15s %-12s %-15s\n" "Server IP" "Read IOPS" "Write IOPS" "Total IOPS" "Read BW" "Write BW" "Total BW" "Avg Latency (ms)" "fsyncs/s" "Threads Fairness" >> "$report_file"
-                        echo "  -------------------------------------------------------------------------------------------------------------------" >> "$report_file"
-                        printf "  %-20s %-12s %-12s %-12s %-12s %-12s %-12s %-15s %-12s %-15s\n" "$local_ip" "$fmt_read_iops" "$fmt_write_iops" "$io_total_iops" "$fmt_read_bw" "$fmt_write_bw" "$io_total_bw" "$fmt_avg_lat" "$fmt_fsync" "$io_fairness_str" >> "$report_file"
-                        echo "  -------------------------------------------------------------------------------------------------------------------" >> "$report_file"
-                        
-                        # Extended metrics section
-                        echo "" >> "$report_file"
-                        echo "  Extended Metrics:" >> "$report_file"
-                        printf "  %-20s %-15s %-15s %-15s\n" "Server IP" "Min Latency (ms)" "Max Latency (ms)" "P95 Latency (ms)" >> "$report_file"
-                        printf "  %-20s %-15s %-15s %-15s\n" "$local_ip" "$fmt_min_lat" "$fmt_max_lat" "$fmt_p95_lat" >> "$report_file"
-                    else
-                        echo "  Test not executed" >> "$report_file"
-                    fi
-                fi
-            fi
         else
             echo "  Test not executed" >> "$report_file"
         fi
@@ -3909,10 +3715,9 @@ EOF
         if grep -q "Threads test summary:\|THREADS TEST RESULTS" "$combined_file" 2>/dev/null; then
             # Count Threads test sections (one per server)
             local threads_section_count=$(($(grep -c "Threads test summary:" "$combined_file" 2>/dev/null) + $(grep -c "THREADS TEST RESULTS" "$combined_file" 2>/dev/null)))
-            
-            if true; then
-                # Multiple servers - show comparison table
-                echo "  Threads Test Results" >> "$report_file"
+
+            # Show comparison table
+            echo "  Threads Test Results" >> "$report_file"
                 echo "  ==========================================" >> "$report_file"
                 printf "  %-20s %-15s %-15s %-15s\n" "Server IP" "Events/sec" "Avg Latency (ms)" "P95 Latency (ms)" >> "$report_file"
                 echo "  -----------------------------------------" >> "$report_file"
@@ -3995,46 +3800,6 @@ EOF
                     fi
                     printf "  %-20s %-15s %-15s %-15s\n" "$current_server_ip" "${current_eps:-N/A}" "${current_threads_avg_lat:-N/A}" "${current_threads_p95_lat:-N/A}" >> "$report_file"
                 fi
-            else
-                # Single server - show results directly
-                # Extract only from THREADS TEST RESULTS section
-                local threads_section=$(sed -n '/THREADS TEST RESULTS/,/^[A-Z ]* TEST RESULTS/p' "$combined_file" 2>/dev/null | head -n -1)
-                local threads_events=$(echo "$threads_section" | grep "total number of events:" | awk '{print $NF}')
-                local threads_time=$(echo "$threads_section" | grep "total time:" | awk '{print $NF}' | tr -d 's')
-                local threads_avg_lat=$(echo "$threads_section" | grep -A5 "Latency (ms):" | grep "avg:" | awk '{print $NF}')
-                local threads_p95_lat=$(echo "$threads_section" | grep "95th percentile" | awk '{print $NF}')
-                # Extract only the values from threads fairness lines
-                local threads_events_fair=$(echo "$threads_section" | grep "events (avg/stddev):" | head -1 | sed -E 's/.*events \(avg\/stddev\):\s+//')
-                local threads_execution_fair=$(echo "$threads_section" | grep "execution time (avg/stddev):" | head -1 | sed -E 's/.*execution time \(avg\/stddev\):\s+//')
-
-                if [ -n "$threads_events" ]; then
-                    local fmt_eps
-                    if [ -n "$threads_time" ] && [ "$threads_time" != "0" ]; then
-                        fmt_eps=$(awk "BEGIN {printf \"%.2f\", $threads_events / $threads_time}")
-                    else
-                        fmt_eps=$(awk "BEGIN {printf \"%.2f\", $threads_events}")
-                    fi
-                    local fmt_avg_lat=$(awk "BEGIN {printf \"%.2f\", $threads_avg_lat}" 2>/dev/null || echo "${threads_avg_lat:-N/A}")
-                    local fmt_p95_lat=$(awk "BEGIN {printf \"%.2f\", $threads_p95_lat}" 2>/dev/null || echo "${threads_p95_lat:-N/A}")
-                    
-                    # Format threads fairness for display
-                    local threads_fairness_str="N/A"
-                    if [ -n "$threads_events_fair" ]; then
-                        threads_fairness_str="${threads_events_fair}"
-                    fi
-                    
-                    # Output in table format consistent with multi-server mode
-                    echo "  Threads Test Results" >> "$report_file"
-                    echo "  =====================" >> "$report_file"
-                    echo "  -------------------------------------------------------------------------" >> "$report_file"
-                    printf "  %-20s %-15s %-15s %-15s %-20s\n" "Server IP" "Events/sec" "Avg Latency (ms)" "P95 Latency (ms)" "Threads Fairness" >> "$report_file"
-                    echo "  -------------------------------------------------------------------------" >> "$report_file"
-                    printf "  %-20s %-15s %-15s %-15s %-20s\n" "$local_ip" "$fmt_eps" "$fmt_avg_lat" "$fmt_p95_lat" "$threads_fairness_str" >> "$report_file"
-                    echo "  -------------------------------------------------------------------------" >> "$report_file"
-                else
-                    echo "  Test not executed" >> "$report_file"
-                fi
-            fi
         else
             echo "  Test not executed" >> "$report_file"
         fi
@@ -4052,10 +3817,9 @@ EOF
         if grep -q "Mutex test summary:\|MUTEX TEST RESULTS" "$combined_file" 2>/dev/null; then
             # Count Mutex test sections (one per server)
             local mutex_section_count=$(($(grep -c "Mutex test summary:" "$combined_file" 2>/dev/null) + $(grep -c "MUTEX TEST RESULTS" "$combined_file" 2>/dev/null)))
-            
-            if true; then
-                # Multiple servers - show comparison table
-                echo "  Mutex Test Results" >> "$report_file"
+
+            # Show comparison table
+            echo "  Mutex Test Results" >> "$report_file"
                 echo "  =========================================" >> "$report_file"
                 printf "  %-20s %-15s %-15s %-15s\n" "Server IP" "Transactions" "TPS" "Avg Latency (ms)" >> "$report_file"
                 echo "  -----------------------------------------" >> "$report_file"
@@ -4133,32 +3897,6 @@ EOF
                     fi
                     printf "  %-20s %-15s %-15s %-15s\n" "$current_server_ip" "${current_events:-N/A}" "${current_tps:-N/A}" "${current_mutex_avg_lat:-N/A}" >> "$report_file"
                 fi
-            else
-                # Single server - show results directly
-                local mutex_events=$(grep -A30 "MUTEX TEST RESULTS" "$combined_file" 2>/dev/null | grep "total number of events:" | awk '{print $NF}')
-                local mutex_time=$(grep -A30 "MUTEX TEST RESULTS" "$combined_file" 2>/dev/null | grep "total time:" | awk '{print $NF}' | tr -d 's')
-                local mutex_avg_lat=$(grep -A30 "MUTEX TEST RESULTS" "$combined_file" 2>/dev/null | grep -A5 "Latency (ms):" | grep "avg:" | awk '{print $NF}')
-                local mutex_p95_lat=$(grep -A30 "MUTEX TEST RESULTS" "$combined_file" 2>/dev/null | grep "95th percentile" | awk '{print $NF}')
-
-                if [ -n "$mutex_events" ]; then
-                    local mutex_tps=$(awk "BEGIN {printf \"%.2f\", $mutex_events / ${mutex_time:-1}}")
-                    
-                    # Format values to 2 decimal places
-                    local fmt_tps=$(awk "BEGIN {printf \"%.2f\", $mutex_tps}" 2>/dev/null || echo "$mutex_tps")
-                    local fmt_avg_lat=$(awk "BEGIN {printf \"%.2f\", $mutex_avg_lat}" 2>/dev/null || echo "${mutex_avg_lat:-N/A}")
-                    
-                    # Output in table format consistent with multi-server mode
-                    echo "  Mutex Test Results" >> "$report_file"
-                    echo "  ===================" >> "$report_file"
-                    echo "  ----------------------------------------" >> "$report_file"
-                    printf "  %-20s %-15s %-15s %-15s\n" "Server IP" "Transactions" "TPS" "Avg Latency (ms)" >> "$report_file"
-                    echo "  ----------------------------------------" >> "$report_file"
-                    printf "  %-20s %-15s %-15s %-15s\n" "$local_ip" "$mutex_events" "$fmt_tps" "$fmt_avg_lat" >> "$report_file"
-                    echo "  ----------------------------------------" >> "$report_file"
-                else
-                    echo "  Test not executed" >> "$report_file"
-                fi
-            fi
         else
             echo "  Test not executed" >> "$report_file"
         fi
@@ -4621,29 +4359,7 @@ main() {
                 if [ "$target_ip" != "$local_ip" ]; then
                     echo "  [DRY RUN] Showing commands that would execute on remote server $target_ip:"
                 fi
-                if [ "$CPU_ENABLED" != "false" ]; then
-                    run_cpu_test
-                fi
-                
-                if [ "$MEMORY_ENABLED" != "false" ]; then
-                    run_memory_test
-                fi
-                
-                if [ "$IO_ENABLED" != "false" ]; then
-                    run_io_test
-                fi
-                
-                if [ "$THREADS_ENABLED" != "false" ]; then
-                    run_threads_test
-                fi
-                
-                if [ "$MUTEX_ENABLED" != "false" ]; then
-                    run_mutex_test
-                fi
-                
-                if [ "$PGBENCH_ENABLED" = "true" ]; then
-                    run_pgbench_test
-                fi
+                run_all_selected_tests
             else
                 # Remote server test (actual execution)
                 echo "  Executing remote tests on $target_ip..."

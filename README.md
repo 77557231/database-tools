@@ -258,7 +258,7 @@ cat output/report_benchmark_*.log
 - **events/sec**：每秒执行事件数（越高越好）
 - **avg latency**：平均延迟（越低越好）
 - **P95/P99 latency**：95/99 百分位延迟（越低越好）
-- **Threads fairness**：线程公平性指标，events 和 execution time 的平均/标准差
+- **Threads Fairness**：线程公平性指标，表示各线程间事件分布和执行时间的均衡程度（越接近 1.0 越好）
 
 ### 内存测试
 
@@ -272,16 +272,21 @@ cat output/report_benchmark_*.log
 - **IOPS**：每秒 IO 操作数（越高越好）
 - **Bandwidth**：吞吐量 MB/s（越高越好）
 - **Latency**：延迟（越低越好）
-- **fsyncs/s**：每秒 fsync 操作数（仅 sysbench）
+- **fsyncs/s**：每秒 fsync 操作数（仅 sysbench，衡量同步写入性能）
 - **Min/Max/P95/P99 latency**：最小/最大/95/99 百分位延迟（仅 fio）
 - **Device utilization**：设备利用率（仅 fio）
 - **CPU user/system**：CPU 用户态/系统态利用率（仅 fio）
+- **bw_min/bw_max**：最小/最大带宽（仅 fio，反映带宽稳定性）
+- **slat/clat**：提交延迟/完成延迟（仅 fio，slat 指 IO 提交到设备的时间，clat 指设备处理完成的时间）
+- **ctx/majf/minf**：上下文切换/主要页错误/次要页错误（仅 fio，反映系统资源使用情况）
+- **iodepth_level**：IO 队列深度级别（仅 fio，反映 IO 并发程度）
 
 ### 网络测试
 
 - **Bandwidth**：网络带宽 MB/s（越高越好）
-- **Retransmits**：重传次数（越少越好）
-- **RTT (ms)**：往返时间，包含 min/max 值（越低越好）
+- **Retransmits**：TCP 重传次数（越少越好，指示网络质量）
+- **RTT (min/max/mean)**：往返时间的最小/最大/平均值（越低越好）
+- **TCP Congestion**：TCP 拥塞控制算法（影响网络传输效率）
 - **CPU**：发送端和接收端的 CPU 利用率
 - **Jitter**：抖动（仅 UDP，越低越好）
 - **Packet loss**：丢包率（仅 UDP，越低越好）
