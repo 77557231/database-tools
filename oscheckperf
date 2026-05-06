@@ -39,6 +39,12 @@ NO_CHECKS=false
 # Network configuration defaults
 NETWORK_PORT_DEFAULT=25201
 
+# Report formatting constants
+SEPARATOR_LINE="=================================================================================="
+SEPARATOR_SHORT="=============================================="
+SEPARATOR_DASH="------------------------------------------------------------------------------------"
+SEPARATOR_DASH_LONG="-------------------------------------------------------------------------------------------------"
+
 # Trap Ctrl+C (SIGINT) to clean up processes
 trap cleanup SIGINT
 
@@ -930,46 +936,25 @@ check_disk_space() {
     local available_kb=$(get_disk_available_kb "$test_path")
     local available_gb=$((available_kb / 1024 / 1024))
     
-    # Calculate required space based on mode and IO test configuration
-    local required_gb=0
+    # Calculate required space based on IO test configuration
+    local required_gb=2
     
-    # Base requirement based on mode
-    case $MODE in
-        quick)
-            required_gb=2
-            ;;
-        production)
-            required_gb=10
-            ;;
-        deep)
-            required_gb=50
-            ;;
-        *)
-            required_gb=0
-            ;;
-    esac
-    
-    # Additional space for IO tests
+    # Space requirement is mainly determined by IO test size
     if [ "$IO_ENABLED" = "true" ] && [ -n "${IO_TOTAL_SIZE:-}" ]; then
         local io_size_gb=$(convert_to_gb "$IO_TOTAL_SIZE")
         local server_count=1
         
-        # Get number of servers (if using -f servers.txt)
         if [ ${#target_servers[@]} -gt 0 ]; then
             server_count=${#target_servers[@]}
         fi
         
-        # Calculate IO space requirement (each server needs IO_TOTAL_SIZE)
         local io_required=$(echo "$io_size_gb * $server_count" | bc)
-        
-        # Convert to integer for comparison
         local io_required_int=$(echo "$io_required" | cut -d. -f1)
         if [ -z "$io_required_int" ] || [ "$io_required_int" = "0" ]; then
             io_required_int=$(echo "$io_size_gb * $server_count" | bc | cut -d. -f1)
         fi
         
-        # Add IO requirement to base requirement
-        required_gb=$((required_gb + io_required_int))
+        required_gb=$((io_required_int))
         
         echo "  IO test space requirement: ${IO_TOTAL_SIZE} x ${server_count} server(s) = ${io_required}GB"
     fi
@@ -1511,12 +1496,38 @@ EOF
         rm -f "${IO_PATH:-${IO_TEST_PATH:-$HOME/oscheckperf/io_test}}/fio_test_${profile}_"* 2>/dev/null || true
         
         # Parse result
-        if [ "$DRY_RUN" != true ] && [ -f "$json_output" ]; then
+        if [ "$DRY_RUN" != true ] && [ -f "$json_output" ] && jq_available; then
+            # Extract basic metrics (IOPS, BW, Latency)
+            local read_iops=$(jq -r '.jobs[0].read.iops // 0' "$json_output")
+            local write_iops=$(jq -r '.jobs[0].write.iops // 0' "$json_output")
+            local read_bw=$(jq -r '.jobs[0].read.bw // 0' "$json_output")
+            local write_bw=$(jq -r '.jobs[0].write.bw // 0' "$json_output")
+            local read_avg_lat=$(jq -r '.jobs[0].read.lat_ns.mean // 0' "$json_output")
+            local write_avg_lat=$(jq -r '.jobs[0].write.lat_ns.mean // 0' "$json_output")
+            
+            # Convert BW from KB/s to MB/s
+            local read_bw_mb=$(awk "BEGIN {printf \"%.2f\", $read_bw / 1024}" 2>/dev/null || echo "0")
+            local write_bw_mb=$(awk "BEGIN {printf \"%.2f\", $write_bw / 1024}" 2>/dev/null || echo "0")
+            
+            # Convert latency from ns to ms
+            local read_avg_lat_ms=$(awk "BEGIN {printf \"%.2f\", $read_avg_lat / 1000000}" 2>/dev/null || echo "0")
+            local write_avg_lat_ms=$(awk "BEGIN {printf \"%.2f\", $write_avg_lat / 1000000}" 2>/dev/null || echo "0")
+            
+            # Display basic results
+            echo ""
+            echo "  fio [$profile] test results:"
+            echo "    Read IOPS: ${read_iops}"
+            echo "    Write IOPS: ${write_iops}"
+            echo "    Read BW: ${read_bw_mb}MB/s"
+            echo "    Write BW: ${write_bw_mb}MB/s"
+            echo "    Read Latency: ${read_avg_lat_ms}ms"
+            echo "    Write Latency: ${write_avg_lat_ms}ms"
+            
             # Extract and display extended metrics
             local fio_metrics=$(parse_fio_json_to_metrics "$json_output")
             if [ -n "$fio_metrics" ]; then
                 echo ""
-                echo "  fio [$profile] test results (extended):"
+                echo "  fio [$profile] extended metrics:"
                 local lat_p99=$(echo "$fio_metrics" | grep -oP 'lat_p99=\K[^|]+')
                 local disk_util=$(echo "$fio_metrics" | grep -oP 'disk_util=\K[^|]+')
                 local cpu_usr=$(echo "$fio_metrics" | grep -oP 'cpu_usr=\K[^|]+')
@@ -3058,9 +3069,9 @@ generate_report() {
             
             # Show comparison table
             echo "  CPU Test Results" >> "$report_file"
-            echo "  ======================================" >> "$report_file"
+            echo "  $SEPARATOR_SHORT" >> "$report_file"
             printf "  %-20s %-15s %-15s %-15s %-15s\n" "Server IP" "Events/sec" "Avg Latency (ms)" "P95 Latency (ms)" "Max Latency (ms)" >> "$report_file"
-            echo "  -------------------------------------------------------------------------------------" >> "$report_file"
+            echo "  $SEPARATOR_DASH" >> "$report_file"
 
             local in_cpu_section=false
             local current_server_ip=""
@@ -3120,9 +3131,9 @@ EOF
 
             # Show comparison table
             echo "  Memory Test Results" >> "$report_file"
-            echo "  =========================================" >> "$report_file"
+            echo "  $SEPARATOR_SHORT" >> "$report_file"
             printf "  %-20s %-15s %-15s %-15s\n" "Server IP" "Ops/sec" "MiB/sec" "Avg Latency (ms)" >> "$report_file"
-            echo "  ----------------------------------------" >> "$report_file"
+            echo "  $SEPARATOR_DASH" >> "$report_file"
 
             local in_mem_section=false
             local current_server_ip=""
@@ -3180,7 +3191,7 @@ EOF
 
             # Show comparison table
             echo "  IO Test Results" >> "$report_file"
-                echo "  =========================================================" >> "$report_file"
+                echo "  $SEPARATOR_SHORT" >> "$report_file"
                 echo "  IO Tool: ${IO_TOOL:-sysbench}" >> "$report_file"
                 
                 local in_io_section=false
@@ -3436,15 +3447,13 @@ EOF
                 
                 if [ -s "$results_temp_file" ]; then
                     # Print header
+                    echo "  $SEPARATOR_DASH" >> "$report_file"
                     if [ "$is_sysbench" = true ]; then
-                        echo "  ---------------------------------------------------------------------------------------------------" >> "$report_file"
                         printf "  %-20s %-12s %-12s %-12s %-12s %-12s %-12s %-15s %-12s %-10s\n" "Server IP" "Read IOPS" "Write IOPS" "Total IOPS" "Read BW" "Write BW" "Total BW" "Avg Latency (ms)" "fsyncs/s" "Mode" >> "$report_file"
-                        echo "  ---------------------------------------------------------------------------------------------------" >> "$report_file"
                     else
-                        echo "  --------------------------------------------------------------------------------------------" >> "$report_file"
                         printf "  %-20s %-12s %-12s %-12s %-12s %-12s %-12s %-15s %-10s\n" "Server IP" "Read IOPS" "Write IOPS" "Total IOPS" "Read BW" "Write BW" "Total BW" "Avg Latency (ms)" "Mode" >> "$report_file"
-                        echo "  --------------------------------------------------------------------------------------------" >> "$report_file"
                     fi
+                    echo "  $SEPARATOR_DASH" >> "$report_file"
                     
                     # Print core table
                     while IFS='|' read -r server_ip read_iops write_iops total_iops read_bw write_bw total_bw avg_lat io_mode fsync_iops tool; do
@@ -3471,9 +3480,9 @@ EOF
                     if [ "$is_sysbench" = false ]; then
                         echo "" >> "$report_file"
                         echo "  # FIO Extended Metrics" >> "$report_file"
-                        echo "  -------------------------------------------------------------------------------------------------" >> "$report_file"
+                        echo "  $SEPARATOR_DASH_LONG" >> "$report_file"
                         printf "  %-20s %-12s %-12s %-12s %-15s %-15s %-15s %-10s\n" "Server IP" "P99 Lat(ms)" "disk_util(%)" "CPU(usr%)" "CPU(sys%)" "bw_min" "bw_max" "Mode" >> "$report_file"
-                        echo "  -------------------------------------------------------------------------------------------------" >> "$report_file"
+                        echo "  $SEPARATOR_DASH_LONG" >> "$report_file"
                         
                         # Print extended metrics
                         while IFS='|' read -r server_ip read_iops write_iops total_iops read_bw write_bw total_bw avg_lat io_mode fsync_iops tool; do
@@ -3739,7 +3748,7 @@ EOF
                 # Multiple network tests - show comparison table
                 echo "  Network Test Comparison (Multiple Servers)" >> "$report_file"
                 echo "  ============================================================================" >> "$report_file"
-                printf "  %-20s %-20s %-15s %-12s %-12s\n" "Client IP" "Server IP" "Bandwidth (MB/s)" "Retransmits" "RTT(ms)" >> "$report_file"
+                printf "  %-18s %-18s %-14s %-10s %-20s %-35s\n" "Client IP" "Server IP" "Bandwidth (MB/s)" "Retrans" "RTT(ms)" "Extended Metrics" >> "$report_file"
                 echo "  ----------------------------------------------------------------------------" >> "$report_file"
                 
                 # Process each network test file
@@ -3842,20 +3851,21 @@ EOF
                                 rtt_display="$rtt_avg"
                             fi
                         fi
-                        printf "  %-20s %-20s %-15s %-12s %-12s\n" "$client_ip" "$server_ip" "${net_bw}" "${retransmits:-N/A}" "$rtt_display" >> "$report_file"
-                        
-                        # Display CPU and TCP Congestion metrics as Extended Metrics if available
+                        local extended_metrics=""
                         if ([ "$cpu_sender" != "N/A" ] && [ "$cpu_sender" != "null" ]) || ([ "$tcp_congestion" != "N/A" ] && [ "$tcp_congestion" != "null" ]); then
-                            echo "    Extended Metrics:" >> "$report_file"
                             if [ "$cpu_sender" != "N/A" ] && [ "$cpu_sender" != "null" ]; then
-                                echo "      CPU: Remote ${cpu_sender}%, Local ${cpu_receiver}%" >> "$report_file"
+                                extended_metrics="CPU: ${cpu_sender}%/${cpu_receiver}%"
                             fi
                             if [ "$tcp_congestion" != "N/A" ] && [ "$tcp_congestion" != "null" ]; then
-                                echo "      TCP Congestion: ${tcp_congestion}" >> "$report_file"
+                                if [ -n "$extended_metrics" ]; then
+                                    extended_metrics="$extended_metrics, "
+                                fi
+                                extended_metrics="${extended_metrics}TCP: ${tcp_congestion}"
                             fi
                         fi
+                        printf "  %-18s %-18s %-14s %-10s %-20s %-35s\n" "$client_ip" "$server_ip" "${net_bw}" "${retransmits:-N/A}" "$rtt_display" "$extended_metrics" >> "$report_file"
                     else
-                        printf "  %-20s %-20s %-15s %-12s %-12s\n" "$client_ip" "N/A" "${net_bw}" "${retransmits:-N/A}" "${rtt_avg:-N/A}" >> "$report_file"
+                        printf "  %-18s %-18s %-14s %-10s %-20s %-35s\n" "$client_ip" "N/A" "${net_bw}" "${retransmits:-N/A}" "${rtt_avg:-N/A}" "" >> "$report_file"
                     fi
                     found_results=true
                 done
