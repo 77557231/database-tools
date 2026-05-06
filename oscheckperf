@@ -1,7 +1,7 @@
 #!/bin/bash
 #--------------------------------------------------------------------------------
 #-- File name:   oscheckperf
-#-- Version:     v0.7.3
+#-- Version:     v0.7.4
 #-- Purpose:     Database System Benchmark Tool
 #-- Author:      Vastbase Second-line Team
 #-- Description: One-click system benchmarking tool, supports configuration via config file or command line parameters
@@ -97,7 +97,7 @@ parse_args() {
                 exit 0
                 ;;
             --version)
-                echo "Version: 0.7.3"
+                echo "Version: 0.7.4"
                 exit 0
                 ;;
             --dry-run)
@@ -3069,9 +3069,9 @@ generate_report() {
             
             # Show comparison table
             echo "  CPU Test Results" >> "$report_file"
-            echo "  $SEPARATOR_SHORT" >> "$report_file"
-            printf "  %-20s %-15s %-15s %-15s %-15s\n" "Server IP" "Events/sec" "Avg Latency (ms)" "P95 Latency (ms)" "Max Latency (ms)" >> "$report_file"
-            echo "  $SEPARATOR_DASH" >> "$report_file"
+                echo "  --------------------------------------------------------------------------------------" >> "$report_file"
+                printf "  %-20s %-18s %-18s %-18s %-18s\n" "Server IP" "Events/sec" "Avg Latency (ms)" "P95 Latency (ms)" "Max Latency (ms)" >> "$report_file"
+                echo "  --------------------------------------------------------------------------------------" >> "$report_file"
 
             local in_cpu_section=false
             local current_server_ip=""
@@ -3083,7 +3083,7 @@ generate_report() {
             while IFS= read -r line; do
                 if [[ "$line" =~ "CPU TEST RESULTS" ]]; then
                     if [ "$in_cpu_section" = true ] && [ -n "$current_server_ip" ]; then
-                        printf "  %-20s %-15s %-15s %-15s %-15s\n" "$current_server_ip" "${current_eps:-N/A}" "${current_avg_lat:-N/A}" "${current_p95_lat:-N/A}" "${current_max_lat:-N/A}" >> "$report_file"
+                        printf "  %-20s %-18s %-18s %-18s %-18s\n" "$current_server_ip" "${current_eps:-N/A}" "${current_avg_lat:-N/A}" "${current_p95_lat:-N/A}" "${current_max_lat:-N/A}" >> "$report_file"
                     fi
                     in_cpu_section=true
                     current_server_ip=$(echo "$line" | grep -oP 'Server: \K[0-9.]+' || echo "N/A")
@@ -3131,9 +3131,9 @@ EOF
 
             # Show comparison table
             echo "  Memory Test Results" >> "$report_file"
-            echo "  $SEPARATOR_SHORT" >> "$report_file"
+            echo "  ----------------------------------------------------------------------" >> "$report_file"
             printf "  %-20s %-15s %-15s %-15s\n" "Server IP" "Ops/sec" "MiB/sec" "Avg Latency (ms)" >> "$report_file"
-            echo "  $SEPARATOR_DASH" >> "$report_file"
+            echo "  ----------------------------------------------------------------------" >> "$report_file"
 
             local in_mem_section=false
             local current_server_ip=""
@@ -3191,7 +3191,6 @@ EOF
 
             # Show comparison table
             echo "  IO Test Results" >> "$report_file"
-                echo "  $SEPARATOR_SHORT" >> "$report_file"
                 echo "  IO Tool: ${IO_TOOL:-sysbench}" >> "$report_file"
                 
                 local in_io_section=false
@@ -3447,32 +3446,34 @@ EOF
                 
                 if [ -s "$results_temp_file" ]; then
                     # Print header
-                    echo "  $SEPARATOR_DASH" >> "$report_file"
                     if [ "$is_sysbench" = true ]; then
-                        printf "  %-20s %-12s %-12s %-12s %-12s %-12s %-12s %-15s %-12s %-10s\n" "Server IP" "Read IOPS" "Write IOPS" "Total IOPS" "Read BW" "Write BW" "Total BW" "Avg Latency (ms)" "fsyncs/s" "Mode" >> "$report_file"
+                        echo "  --------------------------------------------------------------------------------------------------------------------" >> "$report_file"
+                        printf "  %-20s %-11s %-11s %-11s %-11s %-11s %-11s %-13s %-10s %-8s\n" "Server IP" "Read IOPS" "Write IOPS" "Total IOPS" "Read BW" "Write BW" "Total BW" "Latency(ms)" "fsyncs/s" "Mode" >> "$report_file"
+                        echo "  --------------------------------------------------------------------------------------------------------------------" >> "$report_file"
                     else
-                        printf "  %-20s %-12s %-12s %-12s %-12s %-12s %-12s %-15s %-10s\n" "Server IP" "Read IOPS" "Write IOPS" "Total IOPS" "Read BW" "Write BW" "Total BW" "Avg Latency (ms)" "Mode" >> "$report_file"
+                        echo "  ---------------------------------------------------------------------------------------------------------------" >> "$report_file"
+                        printf "  %-20s %-11s %-11s %-11s %-11s %-11s %-11s %-13s %-8s\n" "Server IP" "Read IOPS" "Write IOPS" "Total IOPS" "Read BW" "Write BW" "Total BW" "Latency(ms)" "Mode" >> "$report_file"
+                        echo "  ---------------------------------------------------------------------------------------------------------------" >> "$report_file"
                     fi
-                    echo "  $SEPARATOR_DASH" >> "$report_file"
                     
                     # Print core table
                     while IFS='|' read -r server_ip read_iops write_iops total_iops read_bw write_bw total_bw avg_lat io_mode fsync_iops tool; do
                         if ! [[ "$server_ip" =~ ^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$ ]]; then
                             continue
                         fi
-                        local fmt_read_iops=$(if [ "$read_iops" != "N/A" ]; then awk "BEGIN {printf \"%.2f\", $read_iops}" 2>/dev/null || echo "$read_iops"; else echo "N/A"; fi)
-                        local fmt_write_iops=$(if [ "$write_iops" != "N/A" ]; then awk "BEGIN {printf \"%.2f\", $write_iops}" 2>/dev/null || echo "$write_iops"; else echo "N/A"; fi)
-                        local fmt_total_iops=$(if [ "$total_iops" != "N/A" ]; then awk "BEGIN {printf \"%.2f\", $total_iops}" 2>/dev/null || echo "$total_iops"; else echo "N/A"; fi)
-                        local fmt_read_bw=$(if [ "$read_bw" != "N/A" ]; then awk "BEGIN {printf \"%.2f\", $read_bw}" 2>/dev/null || echo "$read_bw"; else echo "N/A"; fi)
-                        local fmt_write_bw=$(if [ "$write_bw" != "N/A" ]; then awk "BEGIN {printf \"%.2f\", $write_bw}" 2>/dev/null || echo "$write_bw"; else echo "N/A"; fi)
-                        local fmt_total_bw=$(if [ "$total_bw" != "N/A" ]; then awk "BEGIN {printf \"%.2f\", $total_bw}" 2>/dev/null || echo "$total_bw"; else echo "N/A"; fi)
+                        local fmt_read_iops=$(if [ "$read_iops" != "N/A" ]; then awk -v val="$read_iops" 'BEGIN {if (val == int(val)) printf "%d", val; else printf "%.2f", val}' 2>/dev/null || echo "$read_iops"; else echo "N/A"; fi)
+                        local fmt_write_iops=$(if [ "$write_iops" != "N/A" ]; then awk -v val="$write_iops" 'BEGIN {if (val == int(val)) printf "%d", val; else printf "%.2f", val}' 2>/dev/null || echo "$write_iops"; else echo "N/A"; fi)
+                        local fmt_total_iops=$(if [ "$total_iops" != "N/A" ]; then awk -v val="$total_iops" 'BEGIN {if (val == int(val)) printf "%d", val; else printf "%.2f", val}' 2>/dev/null || echo "$total_iops"; else echo "N/A"; fi)
+                        local fmt_read_bw=$(if [ "$read_bw" != "N/A" ]; then awk -v val="$read_bw" 'BEGIN {if (val == int(val)) printf "%d", val; else printf "%.2f", val}' 2>/dev/null || echo "$read_bw"; else echo "N/A"; fi)
+                        local fmt_write_bw=$(if [ "$write_bw" != "N/A" ]; then awk -v val="$write_bw" 'BEGIN {if (val == int(val)) printf "%d", val; else printf "%.2f", val}' 2>/dev/null || echo "$write_bw"; else echo "N/A"; fi)
+                        local fmt_total_bw=$(if [ "$total_bw" != "N/A" ]; then awk -v val="$total_bw" 'BEGIN {if (val == int(val)) printf "%d", val; else printf "%.2f", val}' 2>/dev/null || echo "$total_bw"; else echo "N/A"; fi)
                         local fmt_avg_lat=$(if [ "$avg_lat" != "N/A" ]; then awk "BEGIN {printf \"%.2f\", $avg_lat}" 2>/dev/null || echo "$avg_lat"; else echo "N/A"; fi)
                         local fmt_fsync=$(if [ "$fsync_iops" != "N/A" ]; then awk "BEGIN {printf \"%.2f\", $fsync_iops}" 2>/dev/null || echo "$fsync_iops"; else echo "N/A"; fi)
                         
                         if [ "$is_sysbench" = true ]; then
-                            printf "  %-20s %-12s %-12s %-12s %-12s %-12s %-12s %-15s %-12s %-10s\n" "$server_ip" "$fmt_read_iops" "$fmt_write_iops" "$fmt_total_iops" "$fmt_read_bw" "$fmt_write_bw" "$fmt_total_bw" "$fmt_avg_lat" "$fmt_fsync" "$io_mode" >> "$report_file"
+                            printf "  %-20s %-11s %-11s %-11s %-11s %-11s %-11s %-13s %-10s %-8s\n" "$server_ip" "$fmt_read_iops" "$fmt_write_iops" "$fmt_total_iops" "$fmt_read_bw" "$fmt_write_bw" "$fmt_total_bw" "$fmt_avg_lat" "$fmt_fsync" "$io_mode" >> "$report_file"
                         else
-                            printf "  %-20s %-12s %-12s %-12s %-12s %-12s %-12s %-15s %-10s\n" "$server_ip" "$fmt_read_iops" "$fmt_write_iops" "$fmt_total_iops" "$fmt_read_bw" "$fmt_write_bw" "$fmt_total_bw" "$fmt_avg_lat" "$io_mode" >> "$report_file"
+                            printf "  %-20s %-11s %-11s %-11s %-11s %-11s %-11s %-13s %-8s\n" "$server_ip" "$fmt_read_iops" "$fmt_write_iops" "$fmt_total_iops" "$fmt_read_bw" "$fmt_write_bw" "$fmt_total_bw" "$fmt_avg_lat" "$io_mode" >> "$report_file"
                         fi
                     done < <(sort -t'|' -k1,1 "$results_temp_file")
                     
@@ -3480,9 +3481,9 @@ EOF
                     if [ "$is_sysbench" = false ]; then
                         echo "" >> "$report_file"
                         echo "  # FIO Extended Metrics" >> "$report_file"
-                        echo "  $SEPARATOR_DASH_LONG" >> "$report_file"
+                        echo "  ----------------------------------------------------------------------------------------------------------------" >> "$report_file"
                         printf "  %-20s %-12s %-12s %-12s %-15s %-15s %-15s %-10s\n" "Server IP" "P99 Lat(ms)" "disk_util(%)" "CPU(usr%)" "CPU(sys%)" "bw_min" "bw_max" "Mode" >> "$report_file"
-                        echo "  $SEPARATOR_DASH_LONG" >> "$report_file"
+                        echo "  ----------------------------------------------------------------------------------------------------------------" >> "$report_file"
                         
                         # Print extended metrics
                         while IFS='|' read -r server_ip read_iops write_iops total_iops read_bw write_bw total_bw avg_lat io_mode fsync_iops tool; do
@@ -3530,9 +3531,9 @@ EOF
 
             # Show comparison table
             echo "  Threads Test Results" >> "$report_file"
-                echo "  ==========================================" >> "$report_file"
+                echo "  ----------------------------------------------------------------------" >> "$report_file"
                 printf "  %-20s %-15s %-15s %-15s\n" "Server IP" "Events/sec" "Avg Latency (ms)" "P95 Latency (ms)" >> "$report_file"
-                echo "  -----------------------------------------" >> "$report_file"
+                echo "  ----------------------------------------------------------------------" >> "$report_file"
                 
                 local server_idx=0
                 local in_threads_section=false
@@ -3632,9 +3633,9 @@ EOF
 
             # Show comparison table
             echo "  Mutex Test Results" >> "$report_file"
-                echo "  =========================================" >> "$report_file"
+                echo "  ----------------------------------------------------------------------" >> "$report_file"
                 printf "  %-20s %-15s %-15s %-15s\n" "Server IP" "Transactions" "TPS" "Avg Latency (ms)" >> "$report_file"
-                echo "  -----------------------------------------" >> "$report_file"
+                echo "  ----------------------------------------------------------------------" >> "$report_file"
                 
                 local server_idx=0
                 local in_mutex_section=false
@@ -3747,9 +3748,9 @@ EOF
             if [ ${#network_files[@]} -gt 0 ]; then
                 # Multiple network tests - show comparison table
                 echo "  Network Test Comparison (Multiple Servers)" >> "$report_file"
-                echo "  ============================================================================" >> "$report_file"
-                printf "  %-18s %-18s %-14s %-10s %-20s %-35s\n" "Client IP" "Server IP" "Bandwidth (MB/s)" "Retrans" "RTT(ms)" "Extended Metrics" >> "$report_file"
-                echo "  ----------------------------------------------------------------------------" >> "$report_file"
+                echo "  ------------------------------------------------------------------------------------------------------------" >> "$report_file"
+                printf "  %-18s %-18s %-14s %-10s %-31s %-14s\n" "Client IP" "Server IP" "Bandwidth (MB/s)" "Retrans" "RTT(ms)" "CPU(%)" >> "$report_file"
+                echo "  ------------------------------------------------------------------------------------------------------------" >> "$report_file"
                 
                 # Process each network test file
                 for json_file in "${network_files[@]}"; do
@@ -3851,21 +3852,17 @@ EOF
                                 rtt_display="$rtt_avg"
                             fi
                         fi
-                        local extended_metrics=""
-                        if ([ "$cpu_sender" != "N/A" ] && [ "$cpu_sender" != "null" ]) || ([ "$tcp_congestion" != "N/A" ] && [ "$tcp_congestion" != "null" ]); then
-                            if [ "$cpu_sender" != "N/A" ] && [ "$cpu_sender" != "null" ]; then
-                                extended_metrics="CPU: ${cpu_sender}%/${cpu_receiver}%"
-                            fi
-                            if [ "$tcp_congestion" != "N/A" ] && [ "$tcp_congestion" != "null" ]; then
-                                if [ -n "$extended_metrics" ]; then
-                                    extended_metrics="$extended_metrics, "
-                                fi
-                                extended_metrics="${extended_metrics}TCP: ${tcp_congestion}"
-                            fi
+                        local cpu_display="N/A"
+                        local tcp_display="N/A"
+                        if ([ "$cpu_sender" != "N/A" ] && [ "$cpu_sender" != "null" ]) || ([ "$cpu_receiver" != "N/A" ] && [ "$cpu_receiver" != "null" ]); then
+                            cpu_display="${cpu_sender:-N/A}/${cpu_receiver:-N/A}"
                         fi
-                        printf "  %-18s %-18s %-14s %-10s %-20s %-35s\n" "$client_ip" "$server_ip" "${net_bw}" "${retransmits:-N/A}" "$rtt_display" "$extended_metrics" >> "$report_file"
+                        if [ "$tcp_congestion" != "N/A" ] && [ "$tcp_congestion" != "null" ]; then
+                            tcp_display="${tcp_congestion}"
+                        fi
+                        printf "  %-18s %-18s %-14s %-10s %-26s %-14s\n" "$client_ip" "$server_ip" "${net_bw}" "${retransmits:-N/A}" "$rtt_display" "$cpu_display" >> "$report_file"
                     else
-                        printf "  %-18s %-18s %-14s %-10s %-20s %-35s\n" "$client_ip" "N/A" "${net_bw}" "${retransmits:-N/A}" "${rtt_avg:-N/A}" "" >> "$report_file"
+                        printf "  %-18s %-18s %-14s %-10s %-26s %-14s\n" "$client_ip" "N/A" "${net_bw}" "${retransmits:-N/A}" "${rtt_avg:-N/A}" "" >> "$report_file"
                     fi
                     found_results=true
                 done
