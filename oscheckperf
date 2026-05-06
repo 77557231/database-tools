@@ -1,7 +1,7 @@
 #!/bin/bash
 #--------------------------------------------------------------------------------
 #-- File name:   oscheckperf
-#-- Version:     v0.7.2
+#-- Version:     v0.7.3
 #-- Purpose:     Database System Benchmark Tool
 #-- Author:      Vastbase Second-line Team
 #-- Description: One-click system benchmarking tool, supports configuration via config file or command line parameters
@@ -35,6 +35,9 @@ CONFIG_FILE=""
 OUTPUT_DIR="$OUTPUT_DIR_DEFAULT"
 DRY_RUN=false
 NO_CHECKS=false
+
+# Network configuration defaults
+NETWORK_PORT_DEFAULT=25201
 
 # Trap Ctrl+C (SIGINT) to clean up processes
 trap cleanup SIGINT
@@ -88,7 +91,7 @@ parse_args() {
                 exit 0
                 ;;
             --version)
-                echo "Version: 0.7.2"
+                echo "Version: 0.7.3"
                 exit 0
                 ;;
             --dry-run)
@@ -317,7 +320,7 @@ show_help() {
     echo ""
     echo "Network test parameters:"
     echo "  NETWORK_MODE=serial|parallel|matrix  Network test mode (default: serial)"
-    echo "  NETWORK_PORT=<port>        Test port (default: 25201)"
+    echo "  NETWORK_PORT=<port>        Test port (default: $NETWORK_PORT_DEFAULT)"
     echo "  NETWORK_PARALLEL=<number>  Parallel connections (default: 1)"
     echo ""
     echo "Threads test parameters:"
@@ -378,6 +381,26 @@ check_command() {
     fi
 }
 
+# Require command to exist (exits if not found)
+require_command() {
+    local cmd="$1"
+    local install_hint="$2"
+    
+    if ! command -v "$cmd" &> /dev/null; then
+        echo "Error: Command '$cmd' is required but not installed."
+        if [ -n "$install_hint" ]; then
+            echo "  Please install it: $install_hint"
+        fi
+        return 1
+    fi
+    return 0
+}
+
+# Check if jq is available
+jq_available() {
+    command -v jq &> /dev/null
+}
+
 # Get CPU core count
 get_cpu_cores() {
     nproc 2>/dev/null || grep -c ^processor /proc/cpuinfo 2>/dev/null || echo "unknown"
@@ -396,19 +419,6 @@ get_memory_size_mb() {
 get_disk_available_kb() {
     local path="${1:-$BASE_DIR}"
     df -P "$path" | awk 'NR==2 {print $4}'
-}
-
-# Log output functions
-log_info() {
-    echo "[INFO] $(date '+%Y-%m-%d %H:%M:%S') - $1"
-}
-
-log_error() {
-    echo "[ERROR] $(date '+%Y-%m-%d %H:%M:%S') - $1" >&2
-}
-
-log_warn() {
-    echo "[WARN] $(date '+%Y-%m-%d %H:%M:%S') - $1"
 }
 
 # Debug log function - only outputs when DEBUG is enabled
@@ -597,6 +607,50 @@ cleanup_dir() {
     if [ -d "$dir" ]; then
         rm -rf "$dir"
     fi
+}
+
+# Calculate statistics from bandwidth results
+# Usage: calculate_stats "results_array"
+# Returns: "total_bw|avg_bw|min_bw|max_bw|median_bw|count"
+calculate_stats() {
+    local results=("$@")
+    
+    local total_bw=0
+    local count=0
+    local min_bw=999999
+    local max_bw=0
+    local bw_values=()
+    
+    for result in "${results[@]}"; do
+        IFS='|' read -r src dst r_bw <<< "$result"
+        if [ "$r_bw" != "0" ] && [[ "$r_bw" =~ ^[0-9.]+$ ]]; then
+            total_bw=$(echo "$total_bw + $r_bw" | bc)
+            count=$((count + 1))
+            bw_values+=("$r_bw")
+            if (( $(echo "$r_bw < $min_bw" | bc -l) )); then
+                min_bw="$r_bw"
+            fi
+            if (( $(echo "$r_bw > $max_bw" | bc -l) )); then
+                max_bw="$r_bw"
+            fi
+        fi
+    done
+    
+    local avg_bw="0"
+    local median_bw="0"
+    if [ $count -gt 0 ]; then
+        avg_bw=$(echo "$total_bw / $count" | bc -l)
+        IFS=$'\n' sorted_bw=($(sort -g <<< "${bw_values[*]}"))
+        unset IFS
+        local mid=$((count / 2))
+        if [ $((count % 2)) -eq 0 ]; then
+            median_bw=$(echo "(${sorted_bw[$mid-1]} + ${sorted_bw[$mid]}) / 2" | bc -l)
+        else
+            median_bw="${sorted_bw[$mid]}"
+        fi
+    fi
+    
+    echo "$total_bw|$avg_bw|$min_bw|$max_bw|$median_bw|$count"
 }
 
 # Execute command function (supports dry run mode)
@@ -983,7 +1037,7 @@ cleanup_residual_processes() {
     echo "  Checking and cleaning up residual processes (fio, iperf3, sysbench)..."
     
     local local_ip=$(get_machine_ip)
-    local port="${NETWORK_PORT:-25201}"
+    local port="${NETWORK_PORT:-$NETWORK_PORT_DEFAULT}"
     local total_cleaned=0
     local server_count=0
     local current_user=$(whoami)
@@ -1261,14 +1315,14 @@ run_sysbench_fileio() {
 
     # Change to test directory
     cd "$test_dir" || {
-        echo "❌ Failed to change to test directory: $test_dir"
+        echo "Error: Failed to change to test directory: $test_dir"
         return 1
     }
 
     # Loop through all test modes (space-separated)
     for test_mode in $test_modes; do
         if [[ ! " $valid_modes " =~ " $test_mode " ]]; then
-            echo "❌ Invalid SYSBENCH_PROFILES mode: $test_mode"
+            echo "Error: Invalid SYSBENCH_PROFILES mode: $test_mode"
             echo "  Valid modes: $valid_modes"
             continue
         fi
@@ -1313,7 +1367,7 @@ run_sysbench_fileio() {
         $sysbench_prepare_cmd > "/dev/null" 2>&1
         local prepare_exit=$?
         if [ "$prepare_exit" -ne 0 ]; then
-            echo "❌ Prepare command failed for mode: $test_mode"
+            echo "Error: Prepare command failed for mode: $test_mode"
             continue
         fi
 
@@ -1321,7 +1375,7 @@ run_sysbench_fileio() {
         $sysbench_run_cmd > "$temp_output_file" 2>&1
         local run_exit=$?
         if [ "$run_exit" -ne 0 ]; then
-            echo "❌ Run command failed for mode: $test_mode"
+            echo "Error: Run command failed for mode: $test_mode"
             cat "$temp_output_file"
             continue
         fi
@@ -1502,7 +1556,7 @@ generate_fio_text_from_json() {
         return
     fi
     
-    if ! command -v jq &> /dev/null; then
+    if ! jq_available; then
         echo "Error: jq not installed" > "$output_file"
         return
     fi
@@ -1734,7 +1788,7 @@ run_network_test() {
 # Serial network test (sequential testing)
 run_serial_network_test() {
     start_timer "network_test_serial"
-    local port="${NETWORK_PORT:-25201}"
+    local port="${NETWORK_PORT:-$NETWORK_PORT_DEFAULT}"
     local duration="${DURATION:-60}"
     local parallel="${NETWORK_PARALLEL:-1}"
     
@@ -1888,185 +1942,7 @@ run_serial_network_test() {
     return 0
 }
 
-# Multi-server network test
-run_multi_server_network_test() {
-    echo "Starting multi-server network test..."
-    
-    # Create temp directory if it doesn't exist
-    local output_dir="$TMP_DIR"
-    mkdir -p "$output_dir"
-    
-    # Parse server list
-    local servers=$(parse_servers)
-    local server_ip=""
-    
-    if [ -z "$servers" ]; then
-        # Generate server list from NETWORK_SERVER_IP and NETWORK_CLIENT_IP
-        server_ip="${NETWORK_SERVER_IP}"
-        local client_ip="${NETWORK_CLIENT_IP}"
-        
-        if [ -z "$server_ip" ]; then
-            server_ip=$(get_machine_ip)
-            echo "  Auto-detected server IP: $server_ip"
-        fi
-        
-        if [ -z "$client_ip" ]; then
-            client_ip="$server_ip"
-            echo "  Auto-detected client IP: $client_ip"
-        fi
-        
-        # Convert client IPs to array
-        local client_ips=($client_ip)
-        
-        # Generate server list
-        echo "  Generating server list from NETWORK_SERVER_IP and NETWORK_CLIENT_IP..."
-        servers=""
-        for client in "${client_ips[@]}"; do
-            servers+="$client|client|"
-        done
-        servers+="$server_ip|server|"
-    else
-        # Extract server IP from server list
-        server_ip=$(echo "$servers" | grep '|server|' | cut -d'|' -f1 | head -1)
-        if [ -z "$server_ip" ]; then
-            server_ip=$(get_machine_ip)
-            echo "  Auto-detected server IP: $server_ip"
-        fi
-    fi
-    
-    # Parse test scenarios
-    local scenarios=$(parse_test_scenarios)
-    local default_duration="${NETWORK_DURATION:-60}"
-    
-    if [ -z "$scenarios" ]; then
-        # Generate test scenarios from server list and NETWORK_DURATION
-        local client_ip="${NETWORK_CLIENT_IP}"
-        
-        if [ -z "$client_ip" ]; then
-            client_ip="$server_ip"
-        fi
-        
-        # Convert client IPs to array
-        local client_ips=($client_ip)
-        
-        # Generate test scenarios
-        echo "  Generating test scenarios from NETWORK_SERVER_IP, NETWORK_CLIENT_IP, and NETWORK_DURATION..."
-        scenarios=""
-        for client in "${client_ips[@]}"; do
-            scenarios+="$client|$server_ip|$default_duration,"
-        done
-        # Remove trailing comma
-        scenarios=${scenarios%,}
-    else
-        # Use default duration if not specified in TEST_SCENARIOS
-        local updated_scenarios=""
-        while IFS='|' read -r client_ip server_ip duration; do
-            if [ -z "$duration" ]; then
-                duration="$default_duration"
-            fi
-            updated_scenarios+="$client_ip|$server_ip|$duration,"
-        done <<< "$(echo "$scenarios" | tr ',' '\n')"
-        # Remove trailing comma
-        scenarios=${updated_scenarios%,}
-    fi
-    
-    # Start iperf3 server in background for local tests
-    local port="${NETWORK_PORT:-25201}"
-    local iperf3_pid=""
-    
-    # Check if port is already in use
-    if lsof -i:$port > /dev/null 2>&1; then
-        echo "  Port $port is already in use, killing existing process..."
-        pkill -f "iperf3 -s -p $port" 2>/dev/null || true
-        pkill iperf3 2>/dev/null || true
-        sleep 2
-    fi
-    
-    echo "  Starting iperf3 server on port $port..."
-    # Start iperf3 server in a different way
-    (iperf3 -s -p "$port" > "$TMP_DIR/iperf3_server.log" 2>&1) &
-    iperf3_pid=$!
-    sleep 3  # Wait for server to start
-    
-    # Verify server is running
-    if ! ps -p "$iperf3_pid" > /dev/null 2>&1; then
-        echo "⚠ Failed to start iperf3 server"
-        echo "  Server log:"
-        cat "$TMP_DIR/iperf3_server.log" 2>/dev/null
-        # Try alternative approach
-        echo "  Trying alternative approach..."
-        iperf3 -s -p "$port" -D > "$TMP_DIR/iperf3_server_alt.log" 2>&1
-        iperf3_pid=$!
-        sleep 2
-        if ! ps -p "$iperf3_pid" > /dev/null 2>&1; then
-            echo "  Alternative approach failed"
-            echo "  Alternative log:"
-            cat "$TMP_DIR/iperf3_server_alt.log" 2>/dev/null
-            return 1
-        fi
-    fi
-    
-    echo "  iperf3 server started successfully with PID: $iperf3_pid"
-    
-    # Execute each test scenario sequentially
-    local scenario_idx=0
-    
-    while IFS='|' read -r client_ip server_ip duration; do
-        scenario_idx=$((scenario_idx + 1))
-        echo ""
-        echo "Executing scenario $scenario_idx: $client_ip -> $server_ip (${duration}s)"
-        
-        # Run iperf3 locally
-        # Note: For remote testing, SSH passwordless login is required
-        echo "  Running network test..."
-        echo "  Command: iperf3 -c $server_ip -p $port -t $duration -J"
-        
-        # Create temp directory if it doesn't exist
-        local output_dir="$TMP_DIR"
-        mkdir -p "$output_dir"
-        
-        # Update output file path
-        local output_file="$output_dir/network_scenario_${scenario_idx}.json"
-        
-        # Run iperf3 locally
-        echo "  Running network test locally..."
-        iperf3 -c "$server_ip" -p "$port" -t "$duration" -J > "$output_file" 2>&1
-        
-        # Check if iperf3 command succeeded
-        if [ $? -eq 0 ]; then
-            # Generate text format output from JSON
-            local text_output="$output_dir/network_scenario_${scenario_idx}_text.txt"
-            generate_iperf3_text_from_json "$output_file" "$text_output"
-            
-            # Parse and display result
-            parse_iperf3_result "$output_file"
-            
-            # Display per-second throughput
-            display_per_second_throughput "$text_output" "$server_ip (from $client_ip)"
-            
-            # Append to combined results file
-            append_to_original "NETWORK TEST RESULTS ($server_ip from $client_ip)" "$text_output"
-            
-            echo "  ✓ Network test completed locally"
-        else
-            echo "  ⚠ iperf3 test failed"
-            
-            # For demonstration, just create an empty file
-            touch "$output_file"
-        fi
-        
-    done <<< "$(echo "$scenarios" | tr ',' '\n')"
 
-    
-    # Stop iperf3 server
-    echo "  Stopping iperf3 server..."
-    kill "$iperf3_pid" 2>/dev/null || true
-    pkill -f "iperf3 -s -p $port" 2>/dev/null || true
-    sleep 1
-    
-    echo ""
-    echo "✓ Multi-server network test completed"
-}
 
 # Matrix network test (all-to-all cross testing)
 run_matrix_network_test() {
@@ -2076,7 +1952,7 @@ run_matrix_network_test() {
     # Get local IP address
     local LOCAL_IP=$(hostname -I | awk '{print $1}')
     
-    local port="${NETWORK_PORT:-25201}"
+    local port="${NETWORK_PORT:-$NETWORK_PORT_DEFAULT}"
     local duration="${DURATION:-60}"
     local parallel="${NETWORK_PARALLEL:-1}"
     
@@ -2211,7 +2087,7 @@ run_matrix_network_test() {
     done
     
     # Generate matrix report
-    generate_matrix_report "${results[@]}" "${host_ips[@]}"
+    generate_matrix_report results host_ips
     
     # Output summary of results to terminal
     if [ ${#results[@]} -gt 0 ]; then
@@ -2233,7 +2109,7 @@ run_parallel_network_test() {
     start_timer "network_test_parallel"
     echo "=== Parallel Network Performance Test ==="
     
-    local port="${NETWORK_PORT:-25201}"
+    local port="${NETWORK_PORT:-$NETWORK_PORT_DEFAULT}"
     local duration="${DURATION:-60}"
     local parallel="${NETWORK_PARALLEL:-1}"
     
@@ -2332,7 +2208,7 @@ run_parallel_network_test() {
     fi
     
     # Generate parallel test report
-    generate_parallel_report "${results[@]}" "$server_ip"
+    generate_parallel_report results "$server_ip"
     
     # Output summary of results to terminal
     if [ ${#results[@]} -gt 0 ]; then
@@ -2351,7 +2227,7 @@ run_parallel_network_test() {
 
 # Generate parallel test report
 generate_parallel_report() {
-    local results=($1)
+    local -n results_arr=$1
     local server_ip="$2"
     local report_file="$TMP_DIR/network_parallel_report_${TIMESTAMP}.txt"
     
@@ -2378,47 +2254,17 @@ EOF
     printf "\t%15s" "Bandwidth (MB/s)" >> "$report_file"
     echo >> "$report_file"
     
-    # Calculate statistics
-    local total_bw=0
-    local count=0
-    local min_bw=999999
-    local max_bw=0
-    local bw_values=()
-    
-    for result in "${results[@]}"; do
+    # Output results to table
+    for result in "${results_arr[@]}"; do
         IFS='|' read -r client_ip r_server_ip r_bw <<< "$result"
         printf "%15s" "$client_ip" >> "$report_file"
         printf "\t%15s" "$r_bw" >> "$report_file"
         echo >> "$report_file"
-        
-        if [ "$r_bw" != "0" ]; then
-            total_bw=$(echo "$total_bw + $r_bw" | bc)
-            count=$((count + 1))
-            bw_values+=("$r_bw")
-            if (( $(echo "$r_bw < $min_bw" | bc -l) )); then
-                min_bw="$r_bw"
-            fi
-            if (( $(echo "$r_bw > $max_bw" | bc -l) )); then
-                max_bw="$r_bw"
-            fi
-        fi
     done
     
-    # Calculate average and median
-    local avg_bw="0"
-    local median_bw="0"
-    if [ $count -gt 0 ]; then
-        avg_bw=$(echo "$total_bw / $count" | bc -l)
-        # Sort bandwidth values for median
-        IFS=$'\n' sorted_bw=($(sort -g <<< "${bw_values[*]}"))
-        unset IFS
-        local mid=$((count / 2))
-        if [ $((count % 2)) -eq 0 ]; then
-            median_bw=$(echo "(${sorted_bw[$mid-1]} + ${sorted_bw[$mid]}) / 2" | bc -l)
-        else
-            median_bw="${sorted_bw[$mid]}"
-        fi
-    fi
+    # Calculate statistics using common function
+    local stats=$(calculate_stats "${results_arr[@]}")
+    IFS='|' read -r total_bw avg_bw min_bw max_bw median_bw count <<< "$stats"
     
     # Add statistics to report
     cat >> "$report_file" << EOF
@@ -2446,13 +2292,12 @@ EOF
 parse_iperf3_matrix_result() {
     local json_file="$1"
     
-    # Check if jq is installed
-    if ! command -v jq &> /dev/null; then
+    if [ ! -f "$json_file" ]; then
         echo "0"
         return
     fi
     
-    if [ ! -f "$json_file" ]; then
+    if ! jq_available; then
         echo "0"
         return
     fi
@@ -2470,8 +2315,8 @@ parse_iperf3_matrix_result() {
 
 # Generate matrix report
 generate_matrix_report() {
-    local results=($1)
-    local hosts=($2)
+    local -n results_arr=$1
+    local -n hosts_arr=$2
     local report_file="$TMP_DIR/network_matrix_report_${TIMESTAMP}.txt"
     
     echo "Generating matrix network test report..."
@@ -2486,7 +2331,7 @@ Test Time: $(date '+%Y-%m-%d %H:%M:%S')
 Test Duration: ${DURATION:-60}s per pair
 Parallel Connections: ${NETWORK_PARALLEL:-1}
 
-Hosts: ${hosts[*]}
+Hosts: ${hosts_arr[*]}
 
 ================================================================================
                               Bandwidth Matrix (MB/s)
@@ -2495,21 +2340,21 @@ EOF
     
     # Create matrix header
     echo -n "FROM\\TO" >> "$report_file"
-    for host in "${hosts[@]}"; do
+    for host in "${hosts_arr[@]}"; do
         printf "\t%15s" "$host" >> "$report_file"
     done
     echo >> "$report_file"
     
     # Create matrix rows
-    for src in "${hosts[@]}"; do
+    for src in "${hosts_arr[@]}"; do
         printf "%15s" "$src" >> "$report_file"
-        for dst in "${hosts[@]}"; do
+        for dst in "${hosts_arr[@]}"; do
             if [ "$src" = "$dst" ]; then
                 printf "\t%15s" "-" >> "$report_file"
             else
                 # Find result for this pair
                 local bandwidth="0"
-                for result in "${results[@]}"; do
+                for result in "${results_arr[@]}"; do
                     IFS='|' read -r r_src r_dst r_bw <<< "$result"
                     if [ "$r_src" = "$src" ] && [ "$r_dst" = "$dst" ]; then
                         bandwidth="$r_bw"
@@ -2522,43 +2367,9 @@ EOF
         echo >> "$report_file"
     done
     
-    # Calculate statistics
-    local total_bw=0
-    local count=0
-    local min_bw=999999
-    local max_bw=0
-    local bw_values=()
-    
-    for result in "${results[@]}"; do
-        IFS='|' read -r r_src r_dst r_bw <<< "$result"
-        if [ "$r_bw" != "0" ]; then
-            total_bw=$(echo "$total_bw + $r_bw" | bc)
-            count=$((count + 1))
-            bw_values+=("$r_bw")
-            if (( $(echo "$r_bw < $min_bw" | bc -l) )); then
-                min_bw="$r_bw"
-            fi
-            if (( $(echo "$r_bw > $max_bw" | bc -l) )); then
-                max_bw="$r_bw"
-            fi
-        fi
-    done
-    
-    # Calculate average and median
-    local avg_bw="0"
-    local median_bw="0"
-    if [ $count -gt 0 ]; then
-        avg_bw=$(echo "$total_bw / $count" | bc -l)
-        # Sort bandwidth values for median
-        IFS=$'\n' sorted_bw=($(sort -g <<< "${bw_values[*]}"))
-        unset IFS
-        local mid=$((count / 2))
-        if [ $((count % 2)) -eq 0 ]; then
-            median_bw=$(echo "(${sorted_bw[$mid-1]} + ${sorted_bw[$mid]}) / 2" | bc -l)
-        else
-            median_bw="${sorted_bw[$mid]}"
-        fi
-    fi
+    # Calculate statistics using common function
+    local stats=$(calculate_stats "${results_arr[@]}")
+    IFS='|' read -r total_bw avg_bw min_bw max_bw median_bw count <<< "$stats"
     
     # Add statistics to report
     cat >> "$report_file" << EOF
@@ -2585,14 +2396,13 @@ EOF
 parse_iperf3_result() {
     local json_file="$1"
     
-    # Check if jq is installed
-    if ! command -v jq &> /dev/null; then
-        echo "⚠ jq not installed, skipping detailed parsing"
+    if [ ! -f "$json_file" ]; then
+        echo "⚠ Result file not found: $json_file"
         return
     fi
     
-    if [ ! -f "$json_file" ]; then
-        echo "⚠ Result file not found: $json_file"
+    if ! jq_available; then
+        echo "⚠ jq not installed, skipping detailed parsing"
         return
     fi
     
@@ -2662,13 +2472,12 @@ generate_iperf3_text_from_json() {
     local json_file="$1"
     local output_file="$2"
     
-    # Check if jq is installed
-    if ! command -v jq &> /dev/null; then
+    if [ ! -f "$json_file" ]; then
         touch "$output_file"
         return
     fi
     
-    if [ ! -f "$json_file" ]; then
+    if ! jq_available; then
         touch "$output_file"
         return
     fi
@@ -2740,8 +2549,7 @@ generate_iperf3_text_from_json() {
 parse_iperf3_json_to_metrics() {
     local json_file="$1"
     
-    # Check if file exists and jq is installed
-    if [ ! -f "$json_file" ] || ! command -v jq > /dev/null 2>&1; then
+    if [ ! -f "$json_file" ] || ! jq_available; then
         echo "retransmits=N/A|rtt_min=N/A|rtt_max=N/A|rtt_avg=N/A|cpu_host=N/A|cpu_remote=N/A|tcp_congestion=N/A"
         return
     fi
@@ -2780,8 +2588,7 @@ parse_iperf3_json_to_metrics() {
 parse_fio_json_to_metrics() {
     local json_file="$1"
     
-    # Check if file exists and jq is installed
-    if [ ! -f "$json_file" ] || ! command -v jq > /dev/null 2>&1; then
+    if [ ! -f "$json_file" ] || ! jq_available; then
         echo "lat_p99=N/A|lat_max=N/A|disk_util=N/A|cpu_usr=N/A|cpu_sys=N/A|bw_min=N/A|bw_max=N/A|slat=N/A|clat=N/A|ctx=N/A|majf=N/A|minf=N/A|iodepth=N/A"
         return
     fi
@@ -3213,7 +3020,7 @@ generate_report() {
     printf -- "  Enabled: ${NETWORK_ENABLED:-true}\n" >> "$report_file"
     printf -- "  Tool: ${NETWORK_TOOL:-iperf3}\n" >> "$report_file"
     printf -- "  Server: ${NETWORK_SERVER_IP:-auto}\n" >> "$report_file"
-    printf -- "  Port: ${NETWORK_PORT:-25201}\n" >> "$report_file"
+    printf -- "  Port: ${NETWORK_PORT:-$NETWORK_PORT_DEFAULT}\n" >> "$report_file"
     printf -- "  Duration: ${unified_duration}s\n" >> "$report_file"
     printf -- "  Parallel: ${NETWORK_PARALLEL:-1}\n" >> "$report_file"
     printf -- "\n" >> "$report_file"
@@ -3464,7 +3271,7 @@ EOF
                             # Try to get bw_min and bw_max from JSON if available
                             local ip_prefix="${current_server_ip//./_}_"
                             for json_file in "$TMP_DIR"/"${ip_prefix}"fio_*_result_*.json "$TMP_DIR"/fio_*_result_*.json; do
-                                if [ -f "$json_file" ] && command -v jq &> /dev/null; then
+                                if [ -f "$json_file" ] && jq_available; then
                                     local b_min=$(jq -r '.jobs[0].read.bw_min // .jobs[0].write.bw_min // "N/A"' "$json_file" 2>/dev/null)
                                     local b_max=$(jq -r '.jobs[0].read.bw_max // .jobs[0].write.bw_max // "N/A"' "$json_file" 2>/dev/null)
                                     if [ "$b_min" != "N/A" ] && [ "$b_min" != "null" ]; then
@@ -3604,7 +3411,7 @@ EOF
                         # Try to get bw_min and bw_max from JSON if available for last server
                         local ip_prefix="${current_server_ip//./_}_"
                         for json_file in "$TMP_DIR"/"${ip_prefix}"fio_*_result_*.json "$TMP_DIR"/fio_*_result_*.json; do
-                            if [ -f "$json_file" ] && command -v jq &> /dev/null; then
+                            if [ -f "$json_file" ] && jq_available; then
                                 local b_min=$(jq -r '.jobs[0].read.bw_min // .jobs[0].write.bw_min // "N/A"' "$json_file" 2>/dev/null)
                                 local b_max=$(jq -r '.jobs[0].read.bw_max // .jobs[0].write.bw_max // "N/A"' "$json_file" 2>/dev/null)
                                 if [ "$b_min" != "N/A" ] && [ "$b_min" != "null" ]; then
@@ -3952,8 +3759,7 @@ EOF
                     local tcp_congestion="N/A"
 
                     if [ -f "$json_file" ]; then
-                        # Check if jq is installed
-                        if command -v jq &> /dev/null; then
+                        if jq_available; then
                             # Extract JSON content by removing any leading non-JSON text
                             local json_content=$(awk 'BEGIN{found=0} /^\{/{found=1} found{print} /^\}/{if(found) exit}' "$json_file" 2>/dev/null || cat "$json_file")
                             
