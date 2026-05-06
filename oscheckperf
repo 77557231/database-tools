@@ -1,7 +1,7 @@
 #!/bin/bash
 #--------------------------------------------------------------------------------
 #-- File name:   oscheckperf
-#-- Version:     v0.7.0
+#-- Version:     v0.7.1
 #-- Purpose:     Database System Benchmark Tool
 #-- Author:      Vastbase Second-line Team
 #-- Description: One-click system benchmarking tool, supports configuration via config file or command line parameters
@@ -88,7 +88,7 @@ parse_args() {
                 exit 0
                 ;;
             --version)
-                echo "Version: 0.7.0"
+                echo "Version: 0.7.1"
                 exit 0
                 ;;
             --dry-run)
@@ -643,8 +643,11 @@ wait_with_timeout() {
 }
 
 # Run all selected benchmark tests (CPU, Memory, IO, Threads, Mutex, Pgbench)
+# Parameter: $1 - include_network (true/false), default false
 # This function is used by both single-machine and cluster modes to avoid code duplication
 run_all_selected_tests() {
+    local include_network="${1:-false}"
+
     if [ "$CPU_ENABLED" != "false" ]; then
         run_cpu_test
     fi
@@ -655,6 +658,10 @@ run_all_selected_tests() {
 
     if [ "$IO_ENABLED" != "false" ]; then
         run_io_test
+    fi
+
+    if [ "$include_network" = "true" ] && [ "$NETWORK_ENABLED" != "false" ]; then
+        run_network_test
     fi
 
     if [ "$THREADS_ENABLED" != "false" ]; then
@@ -668,17 +675,6 @@ run_all_selected_tests() {
     if [ "$PGBENCH_ENABLED" = "true" ]; then
         run_pgbench_test
     fi
-}
-
-# Append server header to original_data log file for traceability
-append_server_header_to_original() {
-    local target_ip="$1"
-    local original_file="$OUTPUT_DIR/original_data_${TIMESTAMP}_all_results.log"
-
-    echo "" >> "$original_file"
-    echo "================================================================================" >> "$original_file"
-    echo "RESULTS FROM SERVER: $target_ip" >> "$original_file"
-    echo "================================================================================" >> "$original_file"
 }
 
 # Format number to 2 decimal places
@@ -4619,33 +4615,7 @@ main() {
         fi
     else
         # Single machine test mode
-        if [ "$CPU_ENABLED" != "false" ]; then
-            run_cpu_test
-        fi
-        
-        if [ "$MEMORY_ENABLED" != "false" ]; then
-            run_memory_test
-        fi
-        
-        if [ "$IO_ENABLED" != "false" ]; then
-            run_io_test
-        fi
-        
-        if [ "$NETWORK_ENABLED" != "false" ]; then
-            run_network_test
-        fi
-        
-        if [ "$THREADS_ENABLED" != "false" ]; then
-            run_threads_test
-        fi
-        
-        if [ "$MUTEX_ENABLED" != "false" ]; then
-            run_mutex_test
-        fi
-        
-        if [ "$PGBENCH_ENABLED" = "true" ]; then
-            run_pgbench_test
-        fi
+        run_all_selected_tests "true"
     fi
     
     # Only generate report in non-remote mode and non-dry-run mode
