@@ -12,6 +12,17 @@ from .html_generator import HTMLGenerator
 from .comparator import ReportComparator
 from .analyzer import ReportAnalyzer
 
+def _get_version() -> str:
+    skill_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    conf_path = os.path.join(skill_dir, 'thresholds.conf')
+    if os.path.exists(conf_path):
+        with open(conf_path, 'r', encoding='utf-8') as f:
+            for line in f:
+                line = line.strip()
+                if line.startswith('REPORT_VERSION='):
+                    return line.split('=', 1)[1].strip()
+    return "unknown"
+
 
 def find_latest_report(output_dir: str = "./output") -> Optional[str]:
     pattern = os.path.join(output_dir, "report_benchmark_*.log")
@@ -59,7 +70,7 @@ Examples:
     parser.add_argument(
         '-v', '--version',
         action='version',
-        version=f"oscheckperf Report Eval v2.3r2"
+        version=f"oscheckperf Report Eval {_get_version()}"
     )
     
     parser.add_argument(
@@ -172,7 +183,7 @@ def run_multi_report(report_files: List[str], output_dir: str, thresholds: Thres
 
 
 def generate_compare_html(comparison: dict, thresholds: ThresholdParser, analysis_text: str = "") -> str:
-    version = thresholds.get('report_version', 'v2.3r2')
+    version = thresholds.get('report_version', '')
     reports = comparison['reports']
     merged = comparison['merged']
     summary = comparison['summary']

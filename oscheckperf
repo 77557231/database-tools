@@ -1,7 +1,7 @@
 #!/bin/bash
 #--------------------------------------------------------------------------------
 #-- File name:   oscheckperf
-#-- Version:     v1.3.1
+#-- Version:     v1.3.2
 #-- Purpose:     Database System Benchmark Tool
 #-- Author:      Wanping Pan 
 #-- Description: One-click system benchmarking tool, supports configuration via config file or command line parameters
@@ -60,6 +60,8 @@ OUTPUT_DIR=""
 # System Configuration Constants
 MIN_DISK_SPACE_GB=1                    # Minimum disk space required for IO tests (GB)
 NETWORK_PORT=""                        # Network test port (set default after config loading)
+NETWORK_PORT_START=""                  # Network port range start (parsed from NETWORK_PORT)
+NETWORK_PORT_END=""                    # Network port range end (parsed from NETWORK_PORT)
 NETWORK_DURATION=""                    # Network test duration in seconds (uses DURATION if not set)
 SSH_PORT=""                            # SSH port for remote server connections (set default after config loading)
 
@@ -82,8 +84,39 @@ CURRENT_TEST_TYPE=""
 # Current server IP being processed
 CURRENT_SERVER_IP=""
 
-# ================================================================================
+# Parse NETWORK_PORT parameter
+# Supports: single port (25201) or port range (25201-25210)
+# Sets: NETWORK_PORT_START, NETWORK_PORT_END
+parse_network_port() {
+    local port_str="$NETWORK_PORT"
+    
+    if [[ "$port_str" =~ ^([0-9]+)-([0-9]+)$ ]]; then
+        NETWORK_PORT_START="${BASH_REMATCH[1]}"
+        NETWORK_PORT_END="${BASH_REMATCH[2]}"
+        if [ "$NETWORK_PORT_START" -gt "$NETWORK_PORT_END" ]; then
+            local temp="$NETWORK_PORT_START"
+            NETWORK_PORT_START="$NETWORK_PORT_END"
+            NETWORK_PORT_END="$temp"
+        fi
+    else
+        NETWORK_PORT_START="$port_str"
+        NETWORK_PORT_END=""
+    fi
+}
 
+# Get port for specified batch index
+# Parameters: batch_idx (0-based), base_port
+# Returns: port number to use for this batch
+get_batch_port() {
+    local batch_idx="$1"
+    
+    if [ -n "$NETWORK_PORT_END" ]; then
+        local port_count=$((NETWORK_PORT_END - NETWORK_PORT_START + 1))
+        echo $((NETWORK_PORT_START + (batch_idx % port_count)))
+    else
+        echo $((NETWORK_PORT_START + batch_idx))
+    fi
+}
 
 get_linux_distro() {
     if [ -f /etc/os-release ]; then
@@ -491,7 +524,7 @@ parse_args() {
                 i=$((i + 1))
                 ;;
             --version)
-                echo "Version: 1.3.1"
+                echo "Version: 1.3.2"
                 exit 0
                 ;;
             --dry-run)
@@ -702,6 +735,7 @@ show_help() {
     echo "  -h                Show this help message"
     echo "  --version         Show version information"
     echo "  --dry-run         Dry run mode (show commands without execution)"
+    echo "  --report          Generate HTML report after tests (uses Python report_eval.py)"
     echo "  --parallel        Execute tests on multiple servers in parallel (default)"
     echo "  --serial          Execute tests on multiple servers sequentially"
     echo ""
@@ -755,6 +789,9 @@ show_help() {
     echo "Network test parameters:"
     echo "  NETWORK_MODE=serial|matrix  Network test mode (default: matrix)"
     echo "  NETWORK_PORT=<port>        Test port (default: 25201)"
+    echo "                             Format: single port (25201) or port range (25201-25210)"
+    echo "                             Single port mode: ports increment without limit"
+    echo "                             Port range mode: ports cycle within the range"
     echo "  NETWORK_PARALLEL=<number>  Parallel connections per test (default: 4)"
     echo "  NETWORK_DURATION=<sec>     Test duration in seconds (uses DURATION if not set)"
     echo ""
@@ -2510,6 +2547,10 @@ check_remote_vastbase() {
 }
 
 confirm_vastbase_warning() {
+    if [ "$NO_CHECKS" = "true" ]; then
+        return
+    fi
+    
     local has_vastbase=false
     local local_ip=$(get_machine_ip)
     
@@ -2548,25 +2589,9 @@ confirm_vastbase_warning() {
     fi
 }
 
-# Display per-second throughput
+# Display per-second throughput (disabled by default, too verbose)
 display_per_second_throughput() {
-    local text_file="$1"
-    local server_ip="$2"
-    
-    if [ ! -f "$text_file" ]; then
-        return
-    fi
-    
-    echo ""
-    echo "Per-second throughput for $server_ip:"
-    # Extract interval lines showing per-second data (format: [  5] 0.00-1.00 sec XXX MBytes X.XX Gbits/sec)
-    # Support both Mbits/sec and Gbits/sec
-    local lines=$(grep "sec" "$text_file" | grep "MBytes" | grep -E "(M|G)bits/sec" | grep -v "sender\|receiver")
-    if [ -n "$lines" ]; then
-        echo "$lines" | sed 's/^/  /'
-    else
-        echo "  No per-second data available"
-    fi
+    return
 }
 
 # Network test function
@@ -3423,8 +3448,12 @@ run_matrix_network_test() {
             done
             
             # Run batch in parallel and collect results
+            # Calculate port for this batch using port rotation
+            local batch_port=$(get_batch_port $batch_idx)
+            echo "  Port for this batch: $batch_port"
+            
             if [ "$DRY_RUN" = true ]; then
-                run_matrix_batch $((batch_idx + 1)) "$port" "$duration" "$parallel" "$LOCAL_IP" "$protocol" "${batch_pairs[@]}"
+                run_matrix_batch $((batch_idx + 1)) "$batch_port" "$duration" "$parallel" "$LOCAL_IP" "$protocol" "${batch_pairs[@]}"
                 for pair in "${batch_pairs[@]}"; do
                     IFS='|' read -r src dst <<< "$pair"
                     results+=("$src|$dst|0")
@@ -3434,7 +3463,7 @@ run_matrix_network_test() {
                     if [[ "$line" == RESULT:* ]]; then
                         results+=("${line#RESULT:}")
                     fi
-                done < <(run_matrix_batch $((batch_idx + 1)) "$port" "$duration" "$parallel" "$LOCAL_IP" "$protocol" "${batch_pairs[@]}")
+                done < <(run_matrix_batch $((batch_idx + 1)) "$batch_port" "$duration" "$parallel" "$LOCAL_IP" "$protocol" "${batch_pairs[@]}")
             fi
 
             # Add sleep between batches to ensure old processes are fully cleaned up
@@ -4862,6 +4891,9 @@ main() {
     NETWORK_PORT="${NETWORK_PORT:-25201}"
     SSH_PORT="${SSH_PORT:-22}"
     IO_PATH="${IO_PATH:-$BASE_DIR/io_test}"
+    
+    # Parse NETWORK_PORT to extract port range
+    parse_network_port
     
     # Set default values for new parameters
     EXEC_MODE="${EXEC_MODE:-parallel}"

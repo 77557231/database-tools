@@ -55,7 +55,7 @@ class ThresholdConfig:
     mutex_good_threshold: float = 90.0
     mutex_warn_threshold: float = 75.0
     
-    report_version: str = "v2.3r2"
+    report_version: str = ""
 
 
 class Config:

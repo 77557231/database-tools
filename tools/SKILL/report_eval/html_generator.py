@@ -43,7 +43,7 @@ class HTMLGenerator:
         return html
     
     def _generate_header(self, basic_info: Dict) -> str:
-        version = self.thresholds.get('report_version', 'v2.3r2')
+        version = self.thresholds.get('report_version', '')
         return f"""<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
@@ -546,7 +546,7 @@ class HTMLGenerator:
         return html
     
     def _generate_footer(self) -> str:
-        version = self.thresholds.get('report_version', 'v2.3r2')
+        version = self.thresholds.get('report_version', '')
         return f"""
 <div class="footer">
   oscheckperf 压测评估报告 &nbsp;·&nbsp; 规则版本：{version} &nbsp;·&nbsp; 生成时间：{datetime.now().strftime('%Y-%m-%d')}
