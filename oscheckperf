@@ -1,7 +1,7 @@
 #!/bin/bash
 #--------------------------------------------------------------------------------
 #-- File name:   oscheckperf
-#-- Version:     v1.3.2
+#-- Version:     v1.3.3
 #-- Purpose:     Database System Benchmark Tool
 #-- Author:      Wanping Pan 
 #-- Description: One-click system benchmarking tool, supports configuration via config file or command line parameters
@@ -524,7 +524,7 @@ parse_args() {
                 i=$((i + 1))
                 ;;
             --version)
-                echo "Version: 1.3.2"
+                echo "Version: 1.3.3"
                 exit 0
                 ;;
             --dry-run)
@@ -946,6 +946,7 @@ get_hardware_info_output() {
     echo "OS_INFO: $(get_os_info 2>/dev/null || echo "N/A")"
     echo "KERNEL_VERSION: $(get_kernel_version 2>/dev/null || echo "N/A")"
     echo "UPTIME: $(get_uptime_info 2>/dev/null || echo "N/A")"
+    echo "CLOCKSOURCE: $(get_clocksource 2>/dev/null || echo "N/A")"
     echo "CPU_MODEL: $(get_cpu_model 2>/dev/null || echo "N/A")"
     echo "CPU_PHYSICAL_CORES: $(get_cpu_physical_cores 2>/dev/null || echo "N/A")"
     echo "CPU_LOGICAL_CORES: $(get_cpu_logical_cores 2>/dev/null || echo "N/A")"
@@ -979,12 +980,15 @@ get_hardware_info_output() {
     # NUMA Topology
     echo "--- NUMA Topology ---"
     echo "NUMA_NODE_COUNT: $(get_numa_node_count 2>/dev/null || echo "N/A")"
+    echo "NUMA_BALANCING: $(get_numa_balancing_status 2>/dev/null || echo "N/A")"
+    echo "NUMASTAT_OUTPUT: $(get_numastat 2>/dev/null || echo "N/A")"
     get_numa_topology 2>/dev/null || echo "N/A"
     # Memory Advanced Info
     echo "--- Memory Advanced Info ---"
     echo "MEM_USAGE_RATE: $(get_memory_usage_rate 2>/dev/null || echo "N/A")"
     echo "THP_STATUS: $(get_thp_status 2>/dev/null || echo "N/A")"
     echo "HUGEPAGES_COUNT: $(get_hugepages_count 2>/dev/null || echo "N/A")"
+    echo "MIN_FREE_KBYTES: $(get_min_free_kbytes 2>/dev/null || echo "N/A")"
     # IO Advanced Info (Benchmark Disk Only)
     echo "--- IO Advanced Info (Benchmark Disk Only) ---"
     echo "DISK_QUEUE_DEPTH: $(get_benchmark_disk_queue_depth 2>/dev/null || echo "N/A")"
@@ -1019,7 +1023,8 @@ get_node_hardware_info() {
             get_numa_topology get_memory_usage_rate get_thp_status get_hugepages_count \
             get_benchmark_disk_queue_depth get_benchmark_disk_read_ahead get_benchmark_disk_trim \
             get_benchmark_disk_max_sectors get_benchmark_mount_options get_network_advanced_info \
-            get_benchmark_disk_device)
+            get_benchmark_disk_device get_min_free_kbytes get_numa_balancing_status get_numastat \
+            get_clocksource)
         
         local remote_script="$hw_funcs
 
@@ -1028,6 +1033,7 @@ echo \"MACHINE_TYPE: \$(get_machine_type)\"
 echo \"OS_INFO: \$(get_os_info)\"
 echo \"KERNEL_VERSION: \$(get_kernel_version)\"
 echo \"UPTIME: \$(get_uptime_info)\"
+echo \"CLOCKSOURCE: \$(get_clocksource)\"
 echo \"CPU_MODEL: \$(get_cpu_model)\"
 echo \"CPU_PHYSICAL_CORES: \$(get_cpu_physical_cores)\"
 echo \"CPU_LOGICAL_CORES: \$(get_cpu_logical_cores)\"
@@ -1059,11 +1065,14 @@ echo \"CPU_FREQ_MAX: \$(get_cpu_freq_max)\"
 echo \"CPU_GOVERNOR: \$(get_cpu_governor)\"
 echo \"--- NUMA Topology ---\"
 echo \"NUMA_NODE_COUNT: \$(get_numa_node_count)\"
+echo \"NUMA_BALANCING: \$(get_numa_balancing_status)\"
+echo \"NUMASTAT_OUTPUT: \$(get_numastat)\"
 get_numa_topology
 echo \"--- Memory Advanced Info ---\"
 echo \"MEM_USAGE_RATE: \$(get_memory_usage_rate)\"
 echo \"THP_STATUS: \$(get_thp_status)\"
 echo \"HUGEPAGES_COUNT: \$(get_hugepages_count)\"
+echo \"MIN_FREE_KBYTES: \$(get_min_free_kbytes)\"
 echo \"--- IO Advanced Info (Benchmark Disk Only) ---\"
 echo \"DISK_QUEUE_DEPTH: \$(get_benchmark_disk_queue_depth)\"
 echo \"DISK_READ_AHEAD: \$(get_benchmark_disk_read_ahead)\"

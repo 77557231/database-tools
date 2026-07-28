@@ -819,6 +819,49 @@ get_numa_topology() {
     fi
 }
 
+# Get NUMA memory distribution statistics (numastat)
+get_numastat() {
+    if command -v numastat &>/dev/null; then
+        numastat 2>/dev/null | tr '\n' '|' || echo "N/A"
+    else
+        echo "N/A"
+    fi
+}
+
+# Get NUMA balancing status
+get_numa_balancing_status() {
+    if [ -f /proc/sys/kernel/numa_balancing ]; then
+        local status=$(cat /proc/sys/kernel/numa_balancing 2>/dev/null)
+        if [ "$status" = "0" ]; then
+            echo "Disabled"
+        elif [ "$status" = "1" ]; then
+            echo "Enabled"
+        else
+            echo "$status"
+        fi
+    else
+        echo "N/A"
+    fi
+}
+
+# Get clock source
+get_clocksource() {
+    if [ -f /sys/devices/system/clocksource/clocksource0/current_clocksource ]; then
+        cat /sys/devices/system/clocksource/clocksource0/current_clocksource 2>/dev/null || echo "N/A"
+    else
+        echo "N/A"
+    fi
+}
+
+# Get min_free_kbytes value
+get_min_free_kbytes() {
+    if [ -f /proc/sys/vm/min_free_kbytes ]; then
+        cat /proc/sys/vm/min_free_kbytes 2>/dev/null || echo "N/A"
+    else
+        echo "N/A"
+    fi
+}
+
 # Get transparent hugepage status
 get_thp_status() {
     if [ -f /sys/kernel/mm/transparent_hugepage/enabled ]; then
@@ -1027,12 +1070,16 @@ print_system_info() {
     local os_info="$3"
     local kernel_version="$4"
     local uptime="$5"
+    local clocksource="${6}"
 
     printf -- "%s[System Information]\n" "$prefix" >> "$report_file"
     printf -- "%s--------------------------------------------------------------------------------\n" "$prefix" >> "$report_file"
     printf -- "%s%-20s %s\n" "$prefix" "OS Version:" "$os_info" >> "$report_file"
     printf -- "%s%-20s %s\n" "$prefix" "Kernel Version:" "$kernel_version" >> "$report_file"
     printf -- "%s%-20s %s\n" "$prefix" "System Uptime:" "$uptime" >> "$report_file"
+    if [ -n "$clocksource" ] && [ "$clocksource" != "N/A" ]; then
+        printf -- "%s%-20s %s\n" "$prefix" "Clock Source:" "$clocksource" >> "$report_file"
+    fi
     printf -- "\n" >> "$report_file"
 }
 
@@ -1317,6 +1364,9 @@ print_memory_info() {
     local usage_rate="${11}"
     local thp_status="${12}"
     local hugepages_count="${13}"
+    local min_free_kbytes="${14}"
+    local numa_balancing="${15}"
+    local numastat_output="${16}"
 
     printf -- "%s[Memory Information]\n" "$prefix" >> "$report_file"
     printf -- "%s--------------------------------------------------------------------------------\n" "$prefix" >> "$report_file"
@@ -1335,6 +1385,9 @@ print_memory_info() {
     if [ -n "$hugepages_count" ] && [ "$hugepages_count" != "N/A" ]; then
         printf -- "%s%-20s %s\n" "$prefix" "Hugepages:" "$hugepages_count" >> "$report_file"
     fi
+    if [ -n "$min_free_kbytes" ] && [ "$min_free_kbytes" != "N/A" ]; then
+        printf -- "%s%-20s %s KB\n" "$prefix" "min_free_kbytes:" "$min_free_kbytes" >> "$report_file"
+    fi
     printf -- "\n" >> "$report_file"
 
     # Memory slots detail
@@ -1346,16 +1399,29 @@ print_memory_info() {
     fi
 
     # NUMA topology
-    if [ "$numa_node_count" != "N/A" ] || [ -n "$numa_detail_lines" ]; then
+    if [ "$numa_node_count" != "N/A" ] || [ -n "$numa_detail_lines" ] || [ -n "$numa_balancing" ]; then
         printf -- "%s[NUMA Topology]\n" "$prefix" >> "$report_file"
         printf -- "%s--------------------------------------------------------------------------------\n" "$prefix" >> "$report_file"
         printf -- "%s%-20s %s\n" "$prefix" "Node Count:" "$numa_node_count" >> "$report_file"
+        if [ -n "$numa_balancing" ] && [ "$numa_balancing" != "N/A" ]; then
+            printf -- "%s%-20s %s\n" "$prefix" "Balancing:" "$numa_balancing" >> "$report_file"
+        fi
         if [ -n "$numa_detail_lines" ]; then
             printf -- "%s%-20s\n" "$prefix" "Topology Detail:" >> "$report_file"
             while IFS= read -r line; do
                 [ -n "$line" ] && printf -- "%s  %s\n" "$prefix" "$line" >> "$report_file"
             done <<< "$numa_detail_lines"
         fi
+        printf -- "\n" >> "$report_file"
+    fi
+    
+    # NUMA memory distribution statistics (separate section)
+    if [ -n "$numastat_output" ] && [ "$numastat_output" != "N/A" ]; then
+        printf -- "%s[NUMA Memory Distribution (numastat)]\n" "$prefix" >> "$report_file"
+        printf -- "%s--------------------------------------------------------------------------------\n" "$prefix" >> "$report_file"
+        printf "%s\n" "$numastat_output" | tr '|' '\n' | while IFS= read -r line; do
+            [ -n "$line" ] && printf -- "%s%s\n" "$prefix" "$line" >> "$report_file"
+        done
         printf -- "\n" >> "$report_file"
     fi
 }
@@ -1480,10 +1546,15 @@ print_node_hardware_info() {
     local cpu_governor="N/A"
     # NUMA
     local numa_node_count="N/A"
+    local numa_balancing="N/A"
+    local numastat_output=""
     # Memory Advanced
     local mem_usage_rate="N/A"
     local thp_status=""
     local hugepages_count="N/A"
+    local min_free_kbytes="N/A"
+    # System
+    local clocksource="N/A"
     # IO Advanced
     local disk_queue_depth="N/A"
     local disk_read_ahead="N/A"
@@ -1581,12 +1652,15 @@ print_node_hardware_info() {
             fi
         elif [ "$in_numa" = "true" ] && [ -n "$line" ]; then
             if [[ "$line" == NUMA_NODE_COUNT:* ]]; then numa_node_count="${line#NUMA_NODE_COUNT: }"
+            elif [[ "$line" == NUMA_BALANCING:* ]]; then numa_balancing="${line#NUMA_BALANCING: }"
+            elif [[ "$line" == NUMASTAT_OUTPUT:* ]]; then numastat_output="${line#NUMASTAT_OUTPUT: }"
             else numa_detail_lines="$numa_detail_lines$line"$'\n'
             fi
         elif [ "$in_memory_advanced" = "true" ] && [ -n "$line" ]; then
             if [[ "$line" == MEM_USAGE_RATE:* ]]; then mem_usage_rate="${line#MEM_USAGE_RATE: }"
             elif [[ "$line" == THP_STATUS:* ]]; then thp_status="${line#THP_STATUS: }"
             elif [[ "$line" == HUGEPAGES_COUNT:* ]]; then hugepages_count="${line#HUGEPAGES_COUNT: }"
+            elif [[ "$line" == MIN_FREE_KBYTES:* ]]; then min_free_kbytes="${line#MIN_FREE_KBYTES: }"
             fi
         elif [ "$in_io_advanced" = "true" ] && [ -n "$line" ]; then
             if [[ "$line" == DISK_QUEUE_DEPTH:* ]]; then disk_queue_depth="${line#DISK_QUEUE_DEPTH: }"
@@ -1609,6 +1683,8 @@ print_node_hardware_info() {
             kernel_version="${line#KERNEL_VERSION: }"
         elif [[ "$line" == UPTIME:* ]]; then
             uptime="${line#UPTIME: }"
+        elif [[ "$line" == CLOCKSOURCE:* ]]; then
+            clocksource="${line#CLOCKSOURCE: }"
         elif [[ "$line" == CPU_MODEL:* ]]; then
             cpu_model="${line#CPU_MODEL: }"
         elif [[ "$line" == CPU_PHYSICAL_CORES:* ]]; then
@@ -1643,14 +1719,15 @@ print_node_hardware_info() {
         [ -n "$nal" ] && all_network_lines+=("$nal")
     done
     
-    print_system_info "$report_file" "$prefix" "$os_info" "$kernel_version" "$uptime"
+    print_system_info "$report_file" "$prefix" "$os_info" "$kernel_version" "$uptime" "$clocksource"
     print_cpu_info "$report_file" "$prefix" \
         "$cpu_arch" "$machine_type" "$cpu_model" "$cpu_physical_cores" "$cpu_logical_cores" "$cpu_freq" \
         "$cpu_l1d_cache" "$cpu_l2_cache" "$cpu_l3_cache" "$cpu_features" "$cpu_freq_min" "$cpu_freq_max" "$cpu_governor"
     print_memory_info "$report_file" "$prefix" \
         "$mem_total" "$mem_available" "$mem_type" "$mem_freq" "$mem_channels" \
         "$mem_slots_detail" "$numa_node_count" "$numa_detail_lines" \
-        "$mem_usage_rate" "$thp_status" "$hugepages_count"
+        "$mem_usage_rate" "$thp_status" "$hugepages_count" \
+        "$min_free_kbytes" "$numa_balancing" "$numastat_output"
     local resolved_io_path="$IO_PATH"
     print_mount_options "$report_file" "$prefix" "$mount_options"
     print_disk_info_section "$report_file" "$prefix" "$resolved_io_path" "${disk_lines[@]}"
@@ -1742,6 +1819,10 @@ generate_hardware_report_unified() {
         local mem_usage_rate=$(get_memory_usage_rate 2>/dev/null || echo "N/A")
         local thp_status=$(get_thp_status 2>/dev/null || echo "N/A")
         local hugepages=$(get_hugepages_count 2>/dev/null || echo "N/A")
+        local min_free_kbytes=$(get_min_free_kbytes 2>/dev/null || echo "N/A")
+        local numa_balancing=$(get_numa_balancing_status 2>/dev/null || echo "N/A")
+        local numastat_output=$(get_numastat 2>/dev/null || echo "N/A")
+        local clocksource=$(get_clocksource 2>/dev/null || echo "N/A")
         local net_bond=$(get_network_bond 2>/dev/null || echo "N/A")
         local net_count=$(get_network_interface_count 2>/dev/null || echo "N/A")
         local disk_queue=$(get_benchmark_disk_queue_depth 2>/dev/null || echo "N/A")
@@ -1773,14 +1854,15 @@ generate_hardware_report_unified() {
             all_network_lines+=("$nal")
         done
 
-        print_system_info "$report_file" "" "$os_info" "$kernel_version" "$uptime"
+        print_system_info "$report_file" "" "$os_info" "$kernel_version" "$uptime" "$clocksource"
         print_cpu_info "$report_file" "" \
             "$cpu_arch" "$machine_type" "$cpu_model" "$cpu_physical_cores" "$cpu_logical_cores" "$cpu_freq" \
             "$cpu_l1d_cache" "$cpu_l2_cache" "$cpu_l3_cache" "$cpu_features" "$cpu_freq_min" "$cpu_freq_max" "$cpu_governor"
         print_memory_info "$report_file" "" \
             "$mem_total" "$mem_available" "$mem_type" "$mem_freq" "$mem_channels" \
             "$mem_slots_detail" "$numa_count" "$numa_detail" \
-            "$mem_usage_rate" "$thp_status" "$hugepages"
+            "$mem_usage_rate" "$thp_status" "$hugepages" \
+            "$min_free_kbytes" "$numa_balancing" "$numastat_output"
         
         local resolved_io_path="$IO_PATH"
         
